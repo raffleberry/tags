@@ -31,14 +31,14 @@ elif [ "$1" = "taglib" ]; then
 
   mkdir -p taglib_build && \
   cd taglib && \
-  cmake -DCMAKE_INSTALL_PREFIX=../taglib_build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_BINDINGS=ON . && \
-  make && \
-  make install
-
+  cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_BINDINGS=ON . && \
+  make && sudo make install
   if [ "$?" != "0" ]; then
-    set +x
     echo "Make sure to install whatever cmake asks you to"
+    exit 1
   fi
+
+  
 
 elif [ "$1" = "build" ]; then
   mkdir -p build

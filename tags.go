@@ -3,8 +3,8 @@ package tags
 /*
 // see -DCMAKE_INSTALL_PREFIX in `bake`
 
-#cgo CFLAGS: -I${SRCDIR}/taglib_build/include/taglib
-#cgo LDFLAGS: -L${SRCDIR}/taglib_build/lib/ -ltag_c -ltag -lstdc++ -lm -lz -static
+#cgo CFLAGS: -I/usr/local/include/taglib
+#cgo LDFLAGS: -L/usr/local/lib/ -ltag_c -ltag -lstdc++ -lm -lz -static
 #include <stdlib.h>
 #include "tag_c.h"
 
