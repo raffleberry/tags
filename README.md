@@ -5,6 +5,8 @@ Use taglib C bindings in Go
 ### Linux
 #### Build Taglib
 ```sh
+git clone --recurse-submodules https://github.com/raffleberry/tags.git
+
 # ubuntu
 sudo apt install gcc g++ cmake make libutfcpp-dev zlib1g-dev
 
@@ -23,10 +25,9 @@ pacman -S mingw-w64-clang-x86_64-taglib mingw-w64-x86_64-gcc
 ```
 Please refer to [Taglib Documentation](https://github.com/taglib/taglib/blob/master/INSTALL.md#windows) for building from source
 
-#### modify cgo directive in `tags.go` to find the dlls
-```
-#cgo CFLAGS: -I/mingw64/include/taglib/
-#cgo LDFLAGS: -L/mingw64/lib/ -ltag_c.dll -ltag.dll -lstdc++ -lm -lz
+#### Install
+```sh
+go get github.com/raffleberry/tags@windows
 
 ```
 
