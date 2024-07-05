@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/raffleberry/tags"
+	"github.com/raffleberry/tags/tags"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	t, err := tags.Read(args[1])
+	t, err := tags.New(args[1])
 
 	if err != nil {
 		fmt.Println(err)

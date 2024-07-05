@@ -3,7 +3,7 @@ package tags_test
 import (
 	"testing"
 
-	"github.com/raffleberry/tags"
+	"github.com/raffleberry/tags/tags"
 )
 
 func Eq(t *testing.T, want, got any) {
@@ -14,7 +14,7 @@ func Eq(t *testing.T, want, got any) {
 
 func TestRead(t *testing.T) {
 	t.Run("tag,audio,properties", func(t *testing.T) {
-		got, err := tags.Read("test/alexanders_ragtime_band__billy_murray.ogg")
+		got, err := tags.New("test/alexanders_ragtime_band__billy_murray.ogg")
 		if err != nil {
 			t.Fatal(err)
 		}
