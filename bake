@@ -12,9 +12,10 @@ export CGO_ENABLED=1
 
 if [[ $(uname -a | grep -io msys) ]]; then
   WIN="1"
-  # windows
-  export CGO_CFLAGS='-I/mingw64/include/taglib/'
-  export CGO_LDFLAGS='-L/mingw64/lib/ -ltag_c.dll -ltag.dll -lstdc++ -lm -lz'
+# using pkg-config from msys
+#  # windows
+#  export CGO_CFLAGS='-I/mingw64/include/taglib/'
+#  export CGO_LDFLAGS='-L/mingw64/lib/ -ltag_c.dll -ltag.dll -lstdc++ -lm -lz'
 fi
 
 if [ "$1" = "run" ]; then

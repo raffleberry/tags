@@ -1,15 +1,10 @@
 package tags
 
 /*
-// see -DCMAKE_INSTALL_PREFIX in `bake`
-
-#cgo CFLAGS: -I/usr/local/include/taglib
-#cgo LDFLAGS: -L/usr/local/lib/ -ltag_c -ltag -lstdc++ -lm -lz -static
-#include <stdlib.h>
+#cgo pkg-config: taglib taglib_c
 #include "tag_c.h"
-
+#include <stdlib.h>
 char* get(char** arr, int i) { return arr[i]; }
-
 */
 import "C"
 import (
