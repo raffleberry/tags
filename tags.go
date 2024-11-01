@@ -1,7 +1,6 @@
 package tags
 
 /*
-#cgo pkg-config: taglib taglib_c
 #include "tag_c.h"
 #include <stdlib.h>
 char* get(char** arr, int i) { return arr[i]; }

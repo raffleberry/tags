@@ -6,17 +6,30 @@ if [ -f ".env" ]; then
   export $(grep -v '^#' .env | xargs -d '\n')
 fi
 
-set -x
+addToPathFront() {
+  if [ -d "$1" ]; then
+    if [[ "$PATH" != *"$1"* ]]; then
+      export PATH=$1:$PATH
+    fi
+  fi
+}
+
+out=$(which go gcc)
+
+if [ "$?" != "0" ]; then
+  echo "go or gcc not in path"
+  exit 1
+fi
+
+HOST=$(go env | grep GOHOSTOS | cut -d'=' -f2)
+ARCH=$(go env | grep GOARCH | cut -d'=' -f2)
+
+# for copying dlls
+addToPathFront ./lib/$HOST/$ARCH/bin
 
 export CGO_ENABLED=1
 
-if [[ $(uname -a | grep -io msys) ]]; then
-  WIN="1"
-# using pkg-config from msys
-#  # windows
-#  export CGO_CFLAGS='-I/mingw64/include/taglib/'
-#  export CGO_LDFLAGS='-L/mingw64/lib/ -ltag_c.dll -ltag.dll -lstdc++ -lm -lz'
-fi
+set -x
 
 if [ "$1" = "run" ]; then
   go run cmd/cli/tag.go
@@ -25,27 +38,22 @@ elif [ "$1" = "play" ]; then
   go run cmd/play/play.go
 
 elif [ "$1" = "taglib" ]; then
-  if [[ $WIN ]]; then
-    echo "https://github.com/taglib/taglib/blob/master/INSTALL.md#windows"
+  if [[ $HOST = "windows" ]]; then
     exit 1
   fi
-
   cd taglib && \
   cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_BINDINGS=ON . && \
   make && sudo make install
   if [ "$?" != "0" ]; then
     echo "Make sure to install whatever cmake asks you to"
-    exit 1
   fi
-
-  
 
 elif [ "$1" = "build" ]; then
   mkdir -p build
   go build  -o build/ cmd/cli/tag.go
 
-  if [[ $WIN ]]; then
-    if [[ $? -eq 0 ]]; then
+  if [[ $? -eq 0 ]]; then
+    if [[ $HOST = "windows" ]]; then
       cp $(ldd build/tag.exe | grep -vi 'system32' | cut -d' ' -f3) build/
     fi
   fi

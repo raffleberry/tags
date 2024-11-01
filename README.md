@@ -1,11 +1,15 @@
 # tags
 Use taglib C bindings in Go
 
-## Usage/Setup
+## Usage
+install `gcc`
+run `go get github.com/raffleberry/tags`
+(window) copy the dlls from lib/windows/{}/bin/ near your executable
+## Building
 
 #### Windows(Msys2)
 ```sh
-pacman -S git mingw-w64-x86_64-pkg-config mingw-w64-x86_64-taglib
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config mingw-w64-x86_64-taglib
 git clone https://github.com/raffleberry/tags.git
 ./bake build
 ```
