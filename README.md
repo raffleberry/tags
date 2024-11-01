@@ -3,8 +3,11 @@ Use taglib C bindings in Go
 
 ## Usage
 install `gcc`
+
 run `go get github.com/raffleberry/tags`
-(window) copy the dlls from lib/windows/{}/bin/ near your executable
+
+(windows) copy the dlls from lib/windows/{$GOARCH}/bin/ near your executable
+
 ## Building
 
 #### Windows(Msys2)
