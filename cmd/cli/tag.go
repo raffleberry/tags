@@ -10,7 +10,6 @@ import (
 
 func main() {
 	args := os.Args
-
 	if args[0] == "go" && len(args) > 2 && args[1] == "run" {
 		args = args[2:]
 	}
@@ -21,12 +20,18 @@ func main() {
 	}
 
 	t, err := tags.Read(args[1])
-
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 	defer t.Close()
+
+	pic, err := t.GetPicture()
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println(pic.Description, pic.MimeType, pic.PictureType)
+	}
 
 	j, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {

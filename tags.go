@@ -3,25 +3,55 @@ package tags
 /*
 #include "tag_c.h"
 #include <stdlib.h>
-char* get(char** arr, int i) { return arr[i]; }
+char* get(char** arr, int i) {
+	return arr[i];
+}
+
+TagLib_Complex_Property_Attribute*** getPictureAttributes(TagLib_File *file) {
+	TagLib_Complex_Property_Attribute*** pic_c = taglib_complex_property_get(file, "PICTURE");
+	return pic_c;
+}
 */
 import "C"
 import (
 	"errors"
+	"os"
 	"sync"
+	"unicode"
 	"unsafe"
+)
+
+const (
+	ENCODING_LATIN_1 = C.int(0)
+	ENCODING_UTF_8   = C.int(1)
+)
+
+var (
+	ErrInvalidFile    = errors.New("invalid file")
+	ErrNoPictureFound = errors.New("no embedded picture found")
 )
 
 func init() {
 	C.taglib_set_string_management_enabled(0)
+	C.taglib_set_strings_unicode(ENCODING_UTF_8)
+}
+
+type Picture struct {
+	MimeType    string
+	Description string
+	PictureType string
+	Data        []byte
 }
 
 type Info struct {
 	mu sync.Mutex
 
-	file_c  *C.TagLib_File
-	tag_c   *C.TagLib_Tag
-	audio_c *C.TagLib_AudioProperties
+	f_stream *C.TagLib_IOStream
+	file_c   *C.TagLib_File
+	tag_c    *C.TagLib_Tag
+	audio_c  *C.TagLib_AudioProperties
+
+	isPathAscii bool
 
 	// Tag api.
 	Tag struct {
@@ -50,14 +80,7 @@ type Info struct {
 
 	// Properties api.
 	Props map[string][]string
-
-	// Complex Properties api.
-	Complex any
 }
-
-var (
-	ErrInvalidFile = errors.New("invalid file")
-)
 
 func fromCs(cs *C.char) string {
 	if cs == nil {
@@ -84,12 +107,27 @@ func fromCsArr(a_cs **C.char) []string {
 fp - path to the file to be read
 */
 func Read(fp string) (*Info, error) {
+
 	var t Info
 
-	fp_cs := C.CString(fp)
-	defer C.free(unsafe.Pointer(fp_cs))
+	if isASCII(fp) {
+		// windows
+		t.isPathAscii = true
 
-	t.file_c = C.taglib_file_new(fp_cs)
+		fp_cs := C.CString(fp)
+		defer C.free(unsafe.Pointer(fp_cs))
+
+		t.file_c = C.taglib_file_new(fp_cs)
+	} else {
+		data, err := os.ReadFile(fp)
+		if err != nil {
+			return nil, err
+		}
+
+		t.f_stream = C.taglib_memory_iostream_new((*C.char)(unsafe.Pointer(&data[0])), C.uint(len(data)))
+		t.file_c = C.taglib_file_new_iostream(t.f_stream)
+	}
+
 	if t.file_c == nil || int(C.taglib_file_is_valid(t.file_c)) == 0 {
 		return &t, ErrInvalidFile
 	}
@@ -133,13 +171,46 @@ func Read(fp string) (*Info, error) {
 	t.Props = p
 	C.taglib_property_free(props_csa)
 
-	// TODO: read complex
 	return &t, nil
+}
+
+func (t *Info) GetPicture() (Picture, error) {
+	pic := Picture{}
+
+	props_c := C.getPictureAttributes(t.file_c)
+	defer C.taglib_complex_property_free(props_c)
+
+	if props_c == nil {
+		return pic, ErrNoPictureFound
+	}
+
+	var pic_c C.TagLib_Complex_Property_Picture_Data
+
+	C.taglib_picture_from_complex_property(props_c, &pic_c)
+
+	pic.MimeType = C.GoString(pic_c.mimeType)
+	pic.Description = C.GoString(pic_c.description)
+	pic.PictureType = C.GoString(pic_c.pictureType)
+	pic.Data = C.GoBytes(unsafe.Pointer(pic_c.data), C.int(pic_c.size))
+
+	return pic, nil
 }
 
 func (t *Info) Close() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.isPathAscii {
+		C.taglib_file_free(t.file_c)
+	} else {
+		C.taglib_iostream_free(t.f_stream)
+	}
+}
 
-	C.taglib_file_free(t.file_c)
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
 }

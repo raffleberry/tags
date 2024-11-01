@@ -1,33 +1,29 @@
 # tags
-Use taglib C bindings in Go
+Use taglib in Go
 
 ## Usage
-install `gcc`
+#### Windows
+- install `gcc` (tdm or msys or ...)
+- run `addToPath.sh`
+- use `go get github.com/raffleberry/tags`
+- run your app
 
-run `go get github.com/raffleberry/tags`
-
-(windows) copy the dlls from lib/windows/{$GOARCH}/bin/ near your executable
-
-## Building
+## Building libs/binaries
 
 #### Windows(Msys2)
 ```sh
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config mingw-w64-x86_64-taglib
-git clone https://github.com/raffleberry/tags.git
-./bake build
 ```
 #### Linux
 ```sh
 # ubuntu
+git clone https://github.com/taglib/taglib
 sudo apt install gcc g++ cmake make libutfcpp-dev zlib1g-dev
-git clone --recurse-submodules https://github.com/raffleberry/tags.git
 
+# (Static builds)
 ./bake taglib
-./bake build
 ```
 test the cli program `build/tags` to double check if it worked.
-
-use `go get` to add this to your projects:-
 ```sh
 go get github.com/raffleberry/tags
 ```
