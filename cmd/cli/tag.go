@@ -26,13 +26,6 @@ func main() {
 	}
 	defer t.Close()
 
-	pic, err := t.GetPicture()
-	if err != nil {
-		fmt.Println(err)
-	} else {
-		fmt.Println(pic.Description, pic.MimeType, pic.PictureType)
-	}
-
 	j, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		panic(err)

@@ -36,13 +36,6 @@ func init() {
 	C.taglib_set_strings_unicode(ENCODING_UTF_8)
 }
 
-type Picture struct {
-	MimeType    string
-	Description string
-	PictureType string
-	Data        []byte
-}
-
 type Info struct {
 	mu sync.Mutex
 
@@ -174,24 +167,20 @@ func Read(fp string) (*Info, error) {
 	return &t, nil
 }
 
-func (t *Info) GetPicture() (Picture, error) {
-	pic := Picture{}
+func (t *Info) GetPicture() ([]byte, error) {
 
 	props_c := C.getPictureAttributes(t.file_c)
 	defer C.taglib_complex_property_free(props_c)
 
 	if props_c == nil {
-		return pic, ErrNoPictureFound
+		return nil, ErrNoPictureFound
 	}
 
 	var pic_c C.TagLib_Complex_Property_Picture_Data
 
 	C.taglib_picture_from_complex_property(props_c, &pic_c)
 
-	pic.MimeType = C.GoString(pic_c.mimeType)
-	pic.Description = C.GoString(pic_c.description)
-	pic.PictureType = C.GoString(pic_c.pictureType)
-	pic.Data = C.GoBytes(unsafe.Pointer(pic_c.data), C.int(pic_c.size))
+	pic := C.GoBytes(unsafe.Pointer(pic_c.data), C.int(pic_c.size))
 
 	return pic, nil
 }
