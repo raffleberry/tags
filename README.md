@@ -4,7 +4,7 @@ Use taglib in Go
 ## Usage
 #### Windows
 - install `gcc` (tdm or msys or ...)
-- run `addToPath.sh`
+- run `source source.bash` (for windows)
 - use `go get github.com/raffleberry/tags`
 - run your app
 
