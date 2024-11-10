@@ -16,6 +16,7 @@ import "C"
 import (
 	"errors"
 	"os"
+	"runtime"
 	"sync"
 	"unicode"
 	"unsafe"
@@ -44,7 +45,7 @@ type Info struct {
 	tag_c    *C.TagLib_Tag
 	audio_c  *C.TagLib_AudioProperties
 
-	isPathAscii bool
+	unicodePath bool
 
 	// Tag api.
 	Tag struct {
@@ -100,18 +101,11 @@ func fromCsArr(a_cs **C.char) []string {
 fp - path to the file to be read
 */
 func Read(fp string) (*Info, error) {
-
 	var t Info
 
-	if isASCII(fp) {
-		// windows
-		t.isPathAscii = true
-
-		fp_cs := C.CString(fp)
-		defer C.free(unsafe.Pointer(fp_cs))
-
-		t.file_c = C.taglib_file_new(fp_cs)
-	} else {
+	if hasUnicodePath(fp) && runtime.GOOS == "windows" {
+		// fopen doesn't work well with unicode paths on windows
+		// (maybe it depends on compiler)
 		data, err := os.ReadFile(fp)
 		if err != nil {
 			return nil, err
@@ -119,6 +113,11 @@ func Read(fp string) (*Info, error) {
 
 		t.f_stream = C.taglib_memory_iostream_new((*C.char)(unsafe.Pointer(&data[0])), C.uint(len(data)))
 		t.file_c = C.taglib_file_new_iostream(t.f_stream)
+	} else {
+		fp_cs := C.CString(fp)
+		defer C.free(unsafe.Pointer(fp_cs))
+
+		t.file_c = C.taglib_file_new(fp_cs)
 	}
 
 	if t.file_c == nil || int(C.taglib_file_is_valid(t.file_c)) == 0 {
@@ -188,18 +187,18 @@ func (t *Info) GetPicture() ([]byte, error) {
 func (t *Info) Close() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.isPathAscii {
+	if t.f_stream == nil {
 		C.taglib_file_free(t.file_c)
 	} else {
 		C.taglib_iostream_free(t.f_stream)
 	}
 }
 
-func isASCII(s string) bool {
+func hasUnicodePath(s string) bool {
 	for i := 0; i < len(s); i++ {
 		if s[i] > unicode.MaxASCII {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
