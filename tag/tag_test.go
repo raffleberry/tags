@@ -18,7 +18,7 @@ func TestValue(t *testing.T) {
 	if got, want := tags.Value("artist"), "An Artist"; got != want {
 		t.Errorf("Value(artist) = %q, want %q", got, want)
 	}
-	// A key that is not there has no value, which is "" rather than an error.
+	// An absent key returns "". It is not an error.
 	if got := tags.Value("album"); got != "" {
 		t.Errorf("Value(album) = %q, want empty", got)
 	}
@@ -28,8 +28,7 @@ func TestValueSkipsEmpty(t *testing.T) {
 	tags := New("artist", "An Artist")
 	tags.Add("artist", "", "Another Artist")
 
-	// The first empty value is not useful, so the first non empty one is
-	// returned instead.
+	// Empty values are skipped. The first non-empty value is returned.
 	if got, want := tags.Value("artist"), "An Artist"; got != want {
 		t.Errorf("Value(artist) = %q, want %q", got, want)
 	}
@@ -47,8 +46,7 @@ func TestValues(t *testing.T) {
 	}
 }
 
-// TestValuesIsACopy covers the returned slice being separate from the tag, so
-// that changing it does not change the tag.
+// TestValuesIsACopy checks that the returned slice is separate from the tag.
 func TestValuesIsACopy(t *testing.T) {
 	tags := New("artist", "An Artist")
 
@@ -68,7 +66,7 @@ func TestInt(t *testing.T) {
 	if got, ok := tags.Int("track"); !ok || got != 7 {
 		t.Errorf("Int(track) = %d, %v, want 7, true", got, ok)
 	}
-	// A field that is not a number is not an error, just no value.
+	// A non-numeric field returns false. It is not an error.
 	if _, ok := tags.Int("title"); ok {
 		t.Error("Int(title) = ok, want false")
 	}
@@ -102,7 +100,7 @@ func TestBool(t *testing.T) {
 		})
 	}
 
-	// A key that is not there is not set.
+	// An absent key returns false.
 	if New().Bool("compilation") {
 		t.Error("Bool on an empty tag = true, want false")
 	}
@@ -116,7 +114,7 @@ func TestSetAndAdd(t *testing.T) {
 		t.Errorf("len(Values(title)) = %d, want %d", got, want)
 	}
 
-	// Setting replaces rather than adding.
+	// Set replaces existing values.
 	tags.Set("title", "Only Title")
 	if got, want := len(tags.Values("title")), 1; got != want {
 		t.Errorf("len(Values(title)) = %d, want %d", got, want)
@@ -125,7 +123,7 @@ func TestSetAndAdd(t *testing.T) {
 		t.Errorf("Value(title) = %q, want %q", got, want)
 	}
 
-	// Setting with no values removes the key.
+	// Set with no values removes the key.
 	tags.Set("title")
 	if _, present := tags["title"]; present {
 		t.Error("Set with no values left the key, want it removed")
@@ -149,7 +147,7 @@ func TestSetDefault(t *testing.T) {
 		t.Errorf("Value(album) = %q, want %q", got, want)
 	}
 
-	// An empty value counts as absent, since it says nothing.
+	// An empty value counts as absent.
 	tags.Set("artist", "")
 	if got := tags.SetDefault("artist", "An Artist"); !got {
 		t.Error("SetDefault on an empty value = false, want true")
@@ -163,7 +161,7 @@ func TestDelete(t *testing.T) {
 	if got := len(tags); got != 0 {
 		t.Errorf("len(tag) = %d, want 0", got)
 	}
-	// Deleting a key that is not there is not an error.
+	// Deleting an absent key is not an error.
 	tags.Delete("title")
 }
 
@@ -175,7 +173,7 @@ func TestKeys(t *testing.T) {
 	if len(got) != len(want) {
 		t.Fatalf("Keys() = %q, want %q", got, want)
 	}
-	// Sorted, so the order does not depend on how the map happens to be laid out.
+	// Results are sorted. Order does not depend on map iteration.
 	for i := range got {
 		if got[i] != want[i] {
 			t.Errorf("Keys()[%d] = %q, want %q", i, got[i], want[i])
@@ -191,8 +189,7 @@ func TestClone(t *testing.T) {
 	clone.Set("artist", "Someone Else")
 	clone.Set("title", "A Title")
 
-	// The original is unchanged, including the values of the key that was
-	// replaced.
+	// The original is unchanged. This includes replaced key values.
 	if got, want := len(tags.Values("artist")), 2; got != want {
 		t.Errorf("len(Values(artist)) = %d, want %d", got, want)
 	}
@@ -201,8 +198,8 @@ func TestClone(t *testing.T) {
 	}
 }
 
-// TestNewIgnoresDanglingValue covers an odd number of arguments, which cannot be
-// paired up.
+// TestNewIgnoresDanglingValue checks odd argument counts. The final key has no
+// value.
 func TestNewIgnoresDanglingValue(t *testing.T) {
 	tags := New("title", "A Title", "artist")
 	if got, want := tags.Value("title"), "A Title"; got != want {
@@ -225,7 +222,7 @@ func TestSplitTotal(t *testing.T) {
 		{"", "", ""},
 		{"/11", "", "11"},
 		{"3/", "3", ""},
-		// A value with more than one slash keeps everything after the first.
+		// Values with more than one slash keep all text after the first slash.
 		{"3/11/12", "3", "11/12"},
 	}
 
@@ -263,8 +260,7 @@ func TestJoinTotal(t *testing.T) {
 	}
 }
 
-// TestSplitAndJoin covers the two together, which is how a track number is split
-// apart and put back.
+// TestSplitAndJoin checks SplitTotal and JoinTotal together.
 func TestSplitAndJoin(t *testing.T) {
 	position, total := SplitTotal("7/12")
 	if got, want := JoinTotal(position, total), "7/12"; got != want {
@@ -272,8 +268,7 @@ func TestSplitAndJoin(t *testing.T) {
 	}
 }
 
-// TestBoolRendersTheID3Way covers the helper that writes a flag the way the
-// ID3v2.3 specification has it, as a single digit.
+// TestBoolRendersTheID3Way checks the helper that formats booleans per ID3v2.3.
 func TestBoolRendersTheID3Way(t *testing.T) {
 	tests := []struct {
 		value bool
@@ -318,7 +313,7 @@ func TestAudioString(t *testing.T) {
 		}
 	}
 
-	// A stream that says nothing still describes itself.
+	// An empty stream still returns a string.
 	empty := Audio{Duration: time.Second}.String()
 	if !strings.Contains(empty, "unknown codec") {
 		t.Errorf("Audio.String() = %q, want it to say the codec is unknown", empty)
@@ -346,22 +341,21 @@ func TestBitrateModeString(t *testing.T) {
 }
 
 func TestPictureTypeString(t *testing.T) {
-	// The names the ID3v2 specification gives, which the other containers copied.
+	// Names from the ID3v2 specification. Other containers use the same names.
 	if got, want := PictureCoverFront.String(), "Cover (front)"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
 	if got, want := PictureOther.String(), "Other"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
-	// A type outside the specification is named by its number, which is more
-	// useful than a wrong name.
+	// A type outside the specification uses its number.
 	if got, want := PictureType(200).String(), "Unknown (200)"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
 }
 
 func TestGenres(t *testing.T) {
-	// The list has to be non empty and hold names that are not numbers.
+	// The list is non-empty. Entries are names, not numbers.
 	if len(Genres) == 0 {
 		t.Fatal("Genres is empty, want the ID3v1 list")
 	}

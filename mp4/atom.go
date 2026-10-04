@@ -1,10 +1,8 @@
-// Package mp4 reads MPEG-4 files, the container behind .m4a, .m4b and .mp4
-// audio.
+// Package mp4 reads MPEG-4 files with .m4a, .m4b, and .mp4 extensions.
 //
-// The container is a tree of atoms, and the metadata lives in the iTunes
-// metadata list under "moov.udta.meta.ilst". [Read] finds that list and turns it
-// into a [tag.Tag]; [Atoms] exposes the tree itself for anything this package
-// does not model, such as chapters.
+// The container is a tree of atoms. Metadata is in the iTunes metadata list at
+// "moov.udta.meta.ilst". [Read] converts that list to a [tag.Tag]. [Atoms]
+// exposes the atom tree for data this package does not model, such as chapters.
 package mp4
 
 import (
@@ -23,38 +21,33 @@ var (
 	ErrAtom = errors.New("mp4: malformed atom")
 )
 
-// Atom is one node of the tree of boxes an MPEG-4 file is made of. Atoms are
-// called atoms in the ISO specification and boxes in the QuickTime one.
+// Atom is one node of the tree of boxes in an MPEG-4 file. The ISO
+// specification calls them atoms. The QuickTime specification calls them boxes.
 type Atom struct {
-	// Name is the four character atom name, such as "moov" or "ilst". Some
-	// atoms use the 0xA9 prefix for a field iTunes named after a copyright
-	// symbol, which is spelled out in the name.
+	// Name is the 4 character atom name, such as "moov" or "ilst". Atoms with a
+	// 0xA9 prefix use "©" in the name.
 	Name string
-	// Offset is where the atom starts in the file.
+	// Offset is the offset of the atom start in the file.
 	Offset int64
-	// Length is the size of the whole atom, its header included.
+	// Length is the size of the whole atom, including the header.
 	Length int64
-	// Children of a container atom, and nil for a leaf. Padding atoms are
-	// leaves here even though a file may nest anything inside them.
+	// Children holds the children of a container atom. It is nil for a leaf.
 	Children []Atom
-	// longLength records that the length was written as 64 bits, which makes
-	// the header sixteen bytes rather than eight.
+	// longLength records a 64 bit length field. The header is then 16 bytes.
 	longLength bool
 }
 
-// headerLen is the size of an atom header: a length, a name, and possibly a
-// 64 bit length field.
+// headerLen is the size of an atom header: a length and a name.
 const (
 	headerLen     = 8
 	longLenPrefix = 16
-	// freeLen is how many bytes follow the header of a "meta" atom before its
-	// children start: a version and flags field.
+	// freeLen is the bytes after a "meta" atom header before children start: a
+	// version and flags field.
 	freeLen = 4
 )
 
-// containers are the atoms this package descends into. It is deliberately not
-// the full set: only the atoms on the path to the metadata and the track
-// description are needed, and parsing every atom of a large file is wasted work.
+// containers lists the atoms parsed for children. It holds only atoms on the
+// path to metadata and track data.
 var containers = map[string]bool{
 	"moov": true,
 	"trak": true,
@@ -68,8 +61,8 @@ var containers = map[string]bool{
 	"traf": true,
 }
 
-// childrenOffset is how many bytes into a container atom its children begin. A
-// "meta" atom is a full box, so four bytes of version and flags come first.
+// childrenOffset returns the offset of children within a container atom.
+// A "meta" atom holds 4 bytes of version and flags first.
 func childrenOffset(name string) int64 {
 	if name == "meta" {
 		return freeLen
@@ -77,7 +70,7 @@ func childrenOffset(name string) int64 {
 	return 0
 }
 
-// Atoms reads the top level atoms of the file in r. r must be seekable.
+// Atoms reads the top level atoms of the file in r. R must be seekable.
 func Atoms(r io.ReadSeeker) ([]Atom, error) {
 	size, err := sizeOf(r)
 	if err != nil {
@@ -92,8 +85,8 @@ func Atoms(r io.ReadSeeker) ([]Atom, error) {
 		atom, err := readAtom(r, offset, 0)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				// A file may be truncated or have trailing bytes that are not an
-				// atom at all. The atoms found so far are still usable.
+				// Truncated files and trailing non-atom bytes stop parsing. Atoms
+				// found so far remain usable.
 				break
 			}
 			return nil, err
@@ -111,12 +104,11 @@ func Atoms(r io.ReadSeeker) ([]Atom, error) {
 }
 
 // Find returns the first top level atom with the given name. The second result
-// is false when there is none.
+// is false when there is no such atom.
 func Find(atoms []Atom, name string) (Atom, bool) { return findChild(atoms, name) }
 
-// Path returns the first atom reachable from a by following the given names
-// through its descendants. The second result is false when the path does not
-// exist, which is normal for a file that does not hold, say, any tags.
+// Path returns the first atom found by following names through descendants. The
+// second result is false when the path does not exist.
 func (a Atom) Path(names ...string) (Atom, bool) {
 	current := a
 	for _, name := range names {
@@ -138,10 +130,10 @@ func findChild(atoms []Atom, name string) (Atom, bool) {
 	return Atom{}, false
 }
 
-// readAtom reads the atom at offset, descending into it when it is a container.
+// readAtom reads the atom at offset. It parses children when the atom is a
+// container.
 func readAtom(r io.ReadSeeker, offset int64, depth int) (Atom, error) {
-	// A file that nests atoms more deeply than this is not one a player would
-	// write, and a cycle from a corrupt length would otherwise loop forever.
+	// Depth is limited to 12. This stops infinite recursion on corrupt lengths.
 	const maxDepth = 12
 
 	if _, err := r.Seek(offset, io.SeekStart); err != nil {
@@ -155,8 +147,8 @@ func readAtom(r io.ReadSeeker, offset int64, depth int) (Atom, error) {
 	atom := Atom{Offset: offset}
 	atom.Name = atomName(header[4:8])
 
-	// The length field has three meanings: a 64 bit length follows when it is 1,
-	// and the atom runs to the end of the file when it is 0.
+	// Length 1 means a 64 bit length follows. Length 0 means the atom runs to
+	// the end of the file.
 	size, headLen := int64(binary.BigEndian.Uint32(header[:4])), int64(headerLen)
 	switch size {
 	case 1:
@@ -192,8 +184,7 @@ func readAtom(r io.ReadSeeker, offset int64, depth int) (Atom, error) {
 		return atom, nil
 	}
 
-	// Descend into the container, stopping at its end so a child that overruns
-	// its parent cannot pull in atoms that belong to the next one.
+	// Descend into the container. Parsing stops at the container end.
 	end := offset + atom.Length
 	pos, err := r.Seek(offset+headLen+childrenOffset(atom.Name), io.SeekStart)
 	if err != nil {
@@ -202,8 +193,7 @@ func readAtom(r io.ReadSeeker, offset int64, depth int) (Atom, error) {
 	for pos+headerLen <= end {
 		child, err := readAtom(r, pos, depth+1)
 		if err != nil {
-			// A damaged child should not cost us the atom holding it, which is
-			// usually where the tags are.
+			// A damaged child does not discard the parent atom.
 			return atom, nil
 		}
 		atom.Children = append(atom.Children, child)
@@ -217,8 +207,7 @@ func readAtom(r io.ReadSeeker, offset int64, depth int) (Atom, error) {
 	return atom, nil
 }
 
-// headerSize returns how many bytes of the atom are its header: eight normally,
-// or sixteen when the length is written as 64 bits.
+// headerSize returns the header size in bytes: 8, or 16 with a 64 bit length.
 func (a Atom) headerSize() int64 {
 	if a.longLength {
 		return longLenPrefix
@@ -226,7 +215,7 @@ func (a Atom) headerSize() int64 {
 	return headerLen
 }
 
-// Data returns the payload of the atom: everything after its header.
+// Data returns the payload of the atom: bytes after the header.
 func (a Atom) Data(r io.ReadSeeker) ([]byte, error) {
 	if _, err := r.Seek(a.Offset+a.headerSize(), io.SeekStart); err != nil {
 		return nil, fmt.Errorf("mp4: seeking: %w", err)
@@ -242,9 +231,8 @@ func (a Atom) Data(r io.ReadSeeker) ([]byte, error) {
 // Child returns the first child with the given name.
 func (a Atom) Child(name string) (Atom, bool) { return findChild(a.Children, name) }
 
-// atomName renders the four bytes of an atom name. iTunes writes a 0xA9 byte
-// where a copyright symbol belongs in names like "©nam", which is not printable
-// on its own.
+// atomName converts 4 raw bytes to an atom name. A leading 0xA9 byte is
+// rendered as "©".
 func atomName(raw []byte) string {
 	name := strings.TrimRight(string(raw), "\x00")
 	if name == "\xa9" {

@@ -1,23 +1,22 @@
-// Package tag holds the vocabulary that every audio metadata reader in this
-// module speaks: the normalized [Tag] key space, the common [File] interface,
-// and the [Audio] and [Picture] values the readers fill in.
+// Package tag defines the types used by every audio metadata reader in this
+// module: the normalized [Tag] key space, the common [File] interface, and the
+// [Audio] and [Picture] values.
 //
 // # Normalization
 //
-// Every container names its metadata fields differently: ID3v2 uses four
-// character frame IDs such as "TIT2", iTunes uses atoms such as "©nam", FLAC
-// uses Vorbis comments such as "TITLE". A [Tag] is the format independent view
-// of that data: lowercase keys drawn from the constants declared here, each
-// holding one or more string values.
+// Each container uses different field names: ID3v2 uses four character frame
+// IDs such as "TIT2", iTunes uses atoms such as "©nam", FLAC uses Vorbis
+// comments such as "TITLE". A [Tag] is the format independent view of that
+// data. Keys are lowercase. Each key holds one or more string values.
 //
-// Normalization does not throw anything away. A native name with a known
-// common meaning is folded onto its common key; anything else is kept under
-// its own lowercased native name. Artwork is not a string, so pictures live in
-// the [Picture] values returned by [File.Pictures] instead of in [Tag].
+// Normalization keeps all fields. A native name with a known common meaning
+// maps to its common key. Other names keep their lowercased native name.
+// Artwork is binary data. Pictures are in the [Picture] values returned by
+// [File.Pictures]. They are not in [Tag].
 //
-// Fields this package does not model remain reachable through the package that
-// knows about them: package id3 for frame level access to an ID3 tag, package
-// mp4 for the atom tree, package flac for its metadata blocks.
+// Fields not modeled here remain available in format packages: package id3 for
+// frame level access to an ID3 tag, package mp4 for the atom tree, package
+// flac for its metadata blocks.
 package tag
 
 // Format identifies the container a [File] was read from.

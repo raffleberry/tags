@@ -22,8 +22,7 @@ func open(t *testing.T, name string) *File {
 	return f
 }
 
-// assertClose compares two durations, which is the only way to check one
-// without pinning the tests to the last nanosecond of a decoder's arithmetic.
+// assertClose compares two durations with 0.001 s tolerance.
 func assertClose(t *testing.T, got time.Duration, want float64) {
 	t.Helper()
 	if math.Abs(got.Seconds()-want) > 0.001 {
@@ -32,8 +31,7 @@ func assertClose(t *testing.T, got time.Duration, want float64) {
 }
 
 func TestStreamProperties(t *testing.T) {
-	// Every one of these files is 3.7 s of silence, which makes the stream
-	// properties easy to check against.
+	// Every file holds 3.7 s of silence.
 	tests := []struct {
 		name       string
 		version    MPEGVersion
@@ -42,7 +40,7 @@ func TestStreamProperties(t *testing.T) {
 		bitrate    int
 		duration   float64
 	}{
-		// Constant bitrate, with an ID3v2 tag at the front.
+		// Constant bitrate with an ID3v2 tag at the front.
 		{"silence-44-s.mp3", MPEG1, 3, 44100, 32000, 3.7675},
 		// The same audio with only an ID3v1 tag.
 		{"silence-44-s-v1.mp3", MPEG1, 3, 44100, 32000, 3.7675},
@@ -137,9 +135,9 @@ func TestID3v1Only(t *testing.T) {
 	}
 }
 
-// TestXing covers a file whose Xing header sits past the first frame rather than
-// inside it, which some encoders still produce. The stream is then only
-// measurable from the frame header and the file size.
+// TestXing covers a file with a Xing header outside the first frame. Some
+// encoders write this layout. Stream data comes from the frame header and
+// file size.
 func TestXing(t *testing.T) {
 	f := open(t, "xing.mp3")
 
@@ -155,8 +153,8 @@ func TestXing(t *testing.T) {
 	assertClose(t, f.Audio().Duration, 2.052)
 }
 
-// TestXingInFirstFrame covers the ordinary case, where the header is in the
-// first frame and so describes the whole stream.
+// TestXingInFirstFrame covers a header in the first frame. The header
+// describes the whole stream.
 func TestXingInFirstFrame(t *testing.T) {
 	f := open(t, "lame.mp3")
 
@@ -178,10 +176,11 @@ func TestXingInFirstFrame(t *testing.T) {
 	}
 }
 
-// TestXingFlags covers the flags byte, which says which optional fields a Xing
-// header holds. A minimal writer sets only the frame count.
+// TestXingFlags covers the flags byte. The flags list present optional fields
+// in a Xing header. A minimal header sets only the frame count.
 func TestXingFlags(t *testing.T) {
-	// Frames, bytes, seek table and quality, which is what LAME writes.
+	// All fields: frames, bytes, seek table and quality. LAME writes all
+	// fields.
 	all := []byte("Xing\x00\x00\x00\x0f" +
 		"\x00\x00\x00\x04" + // 4 frames
 		"\x00\x00\x08&" + // 2086 bytes
@@ -195,7 +194,7 @@ func TestXingFlags(t *testing.T) {
 		t.Errorf("parseXing = %+v, want 4 frames, 2086 bytes and scale 80", got)
 	}
 
-	// Only the frame count.
+	// Header with only the frame count.
 	minimal := parseXing([]byte("Xing\x00\x00\x00\x01\x00\x00\x00\x07"))
 	if minimal == nil {
 		t.Fatal("parseXing = nil, want a header")
@@ -208,9 +207,8 @@ func TestXingFlags(t *testing.T) {
 	}
 }
 
-// TestInfoHeader covers the "Info" header, the constant bitrate variant of
-// Xing, whose presence is what distinguishes a known constant bitrate file from
-// one whose mode is simply unknown.
+// TestInfoHeader covers the Info header. Info is the constant bitrate variant
+// of Xing. Its presence marks a file as constant bitrate.
 func TestInfoHeader(t *testing.T) {
 	got := parseXing([]byte("Info\x00\x00\x00\x03\x00\x00\x00\x0a\x00\x00\x08&6"))
 	if got == nil {
@@ -237,7 +235,7 @@ func TestVBRI(t *testing.T) {
 	if vbr == nil || vbr.Kind != KindVBRI {
 		t.Fatalf("VBRHeader = %+v, want a VBRI header", vbr)
 	}
-	// A VBRI header is written by Fraunhofer's encoder, which says so itself.
+	// A VBRI header marks the Fraunhofer encoder.
 	if got, want := f.Audio().Encoder, "FhG"; got != want {
 		t.Errorf("Encoder = %q, want %q", got, want)
 	}
@@ -296,8 +294,8 @@ func TestLAME(t *testing.T) {
 	}
 }
 
-// TestLAMETrackPeak checks the peak amplitude field, which is a plain 32 bit
-// fraction rather than the packed gain fields around it.
+// TestLAMETrackPeak checks the peak amplitude field. The field is a 32 bit
+// fraction. Neighboring gain fields are packed.
 func TestLAMETrackPeak(t *testing.T) {
 	f := open(t, "lame-peak.mp3")
 	if got, want := f.Stream().VBRHeader.LAME.TrackPeak, 0.21856; math.Abs(got-want) > 0.0001 {
@@ -305,8 +303,8 @@ func TestLAMETrackPeak(t *testing.T) {
 	}
 }
 
-// TestLAMEShortFile covers a file old LAME versions encoded with a delay larger
-// than the audio itself, which must not produce a negative duration.
+// TestLAMEShortFile covers a file with delay larger than the audio. Early
+// LAME versions wrote such files. Duration must not be negative.
 func TestLAMEShortFile(t *testing.T) {
 	f := open(t, "lame397v9short.mp3")
 	if got := f.Audio().Duration; got != 0 {
@@ -315,7 +313,7 @@ func TestLAMEShortFile(t *testing.T) {
 }
 
 func TestID3v2Version(t *testing.T) {
-	// A file written by iTunes, with a v2.3 tag and several COMM frames.
+	// A file with a v2.3 tag and several COMM frames.
 	f := open(t, "id3v22-test.mp3")
 
 	if got, want := f.Tags().Value(tag.Title), "cosmic american"; got != want {
@@ -331,8 +329,8 @@ func TestID3v2Version(t *testing.T) {
 		t.Errorf("tracktotal = %q, want %q", got, want)
 	}
 
-	// The bare COMM becomes the comment, and the ones iTunes files under a
-	// description keep that description.
+	// A COMM frame with no description becomes the comment. COMM frames with
+	// descriptions keep separate keys.
 	if got, want := f.Tags().Value(tag.Comment), "Waterbug Records, www.anaismitchell.com"; got != want {
 		t.Errorf("comment = %q, want %q", got, want)
 	}
@@ -344,26 +342,26 @@ func TestID3v2Version(t *testing.T) {
 	}
 }
 
-// iTunesNORM is the normalization data iTunes files as a comment, which is a
-// fixed string per file.
+// iTunesNORM is normalization data. iTunes stores it as a comment. The value
+// is fixed per file.
 const iTunesNORM = " 0000044E 00000061 00009B67 000044C3 00022478 00022182 00007FCC 00007E5C 0002245E 0002214E"
 
 func TestCombinedID3v1AndID3v2(t *testing.T) {
 	f := open(t, "id3v1v2-combined.mp3")
 
-	// Fields both tags carry agree, so v2 wins.
+	// Fields in both tags agree. The v2 value wins.
 	if got, want := f.Tags().Value(tag.Title), "cosmic american"; got != want {
 		t.Errorf("title = %q, want %q", got, want)
 	}
-	// Only the v1 tag has this one.
+	// This field exists only in the v1 tag.
 	if got, want := f.Tags().Value("comment:id3v1 comment"), "v1 comment"; got != want {
 		t.Errorf("comment:id3v1 comment = %q, want %q", got, want)
 	}
 }
 
 func TestNotMP3(t *testing.T) {
-	// A FLAC file is audio, but none of it is MPEG frames, so the search comes
-	// up empty.
+	// A FLAC file holds audio but no MPEG frames. The frame search finds
+	// nothing.
 	f, err := Open(dataDir + "silence-44-s.flac")
 	if err == nil && !f.Stream().Sketchy {
 		t.Error("Open(flac) = a confident result, want a failure or a sketchy one")
@@ -385,12 +383,12 @@ func TestMatches(t *testing.T) {
 		name string
 		want bool
 	}{
-		// An ID3v2 identifier is what most MP3 files start with.
+		// An ID3v2 identifier starts many MP3 files.
 		{"silence-44-s.mp3", true},
 		{"silence-44-s-v1.mp3", true},
-		// A frame sync, for a file with no tag at all.
+		// A frame sync marks a file with no tag.
 		{"xing.mp3", true},
-		// Neither, so these belong to other containers.
+		// Neither marker marks other containers.
 		{"silence-44-s.flac", false},
 		{"has-tags.m4a", false},
 	}
@@ -404,8 +402,8 @@ func TestMatches(t *testing.T) {
 	}
 }
 
-// openHeader returns the first fileHeaderLen bytes of a test file, which is
-// what a sniffing reader gets to look at.
+// openHeader returns the first fileHeaderLen bytes of a test file. Format
+// detection uses these bytes.
 func openHeader(t *testing.T, name string) []byte {
 	t.Helper()
 	f, err := os.Open(dataDir + name)
@@ -443,9 +441,8 @@ func TestHasMagic(t *testing.T) {
 	}
 }
 
-// TestRejectedHeaders covers the reserved bit combinations a frame header may
-// carry. Accepting any of them would mean mistaking the 0xFF bytes inside a
-// picture or an ID3 tag for audio.
+// TestRejectedHeaders covers reserved bit combinations in a frame header.
+// Acceptance would misread 0xFF bytes in a picture or ID3 tag as audio.
 func TestRejectedHeaders(t *testing.T) {
 	tests := []struct {
 		name string
@@ -468,10 +465,8 @@ func TestRejectedHeaders(t *testing.T) {
 	}
 }
 
-// TestFrameLength covers the arithmetic that turns a bitrate and a sample rate
-// into a frame size, which decides where the search for the next frame starts.
-// These files are all 32 kbit/s, so the frames are small even though the
-// reported average bitrate of the variable bitrate ones is much higher.
+// TestFrameLength covers frame size calculation. Frame size derives from
+// bitrate and sample rate. It sets the start of the next frame search.
 func TestFrameLength(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -508,8 +503,8 @@ func TestFrameLength(t *testing.T) {
 	}
 }
 
-// firstFrameOffset returns where the first MPEG frame starts in a file, that is
-// just past any ID3v2 tag.
+// firstFrameOffset returns the offset of the first MPEG frame. The offset is
+// past any ID3v2 tag.
 func firstFrameOffset(t *testing.T, r *os.File) int64 {
 	t.Helper()
 	if _, err := r.Seek(0, io.SeekStart); err != nil {

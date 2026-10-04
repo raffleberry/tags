@@ -10,8 +10,7 @@ import (
 	"github.com/raffleberry/tags/tag"
 )
 
-// File is an MPEG-4 audio file, which is the container behind the .m4a, .m4b and
-// .mp4 extensions.
+// File is an MPEG-4 audio file with .m4a, .m4b, or .mp4 extension.
 type File struct {
 	atoms    []Atom
 	moov     Atom
@@ -19,16 +18,15 @@ type File struct {
 	audio    tag.Audio
 	tags     tag.Tag
 	pictures []tag.Picture
-	// file is the reader the atoms are offsets into, kept so that the accessors
-	// can fetch a payload on demand.
+	chapters []Chapter
+	// file holds the reader for on-demand payload reads.
 	file io.ReadSeeker
 }
 
-// Format reports that an MPEG-4 audio file was read from.
+// Format reports that an MPEG-4 audio file was read.
 func (f *File) Format() tag.Format { return tag.M4A }
 
-// Tags returns the normalized metadata fields. The result must not be
-// modified.
+// Tags returns the normalized metadata fields. The result must not be modified.
 func (f *File) Tags() tag.Tag { return f.tags }
 
 // Audio returns the properties of the audio stream.
@@ -37,21 +35,18 @@ func (f *File) Audio() tag.Audio { return f.audio }
 // Pictures returns the embedded artwork.
 func (f *File) Pictures() []tag.Picture { return f.pictures }
 
-// Atoms returns the top level atoms of the file, which is the way to reach
-// anything this package does not model, such as the chapter list.
+// Atoms returns the top level atoms of the file.
 func (f *File) Atoms() []Atom { return f.atoms }
 
-// ILST returns the iTunes metadata list the tags came from, or nil when the file
-// has none.
+// ILST returns the iTunes metadata list. It returns nil when the file has none.
 func (f *File) ILST() *ILST { return f.ilst }
 
-// AudioTrack returns the track whose properties [File.Audio] reports, or false
-// when the file has no audio track at all.
+// AudioTrack returns the track reported by [File.Audio]. The second result is
+// false when the file has no audio track.
 func (f *File) AudioTrack() (Atom, bool) { return audioTrack(f.file, f.moov) }
 
-// isAudioHandler reports whether a "hdlr" atom belongs to an audio track. The
-// handler type is four bytes of "soun", "vide" and so on, after the version and
-// flags fields and a reserved field.
+// isAudioHandler reports whether hdlr is an audio track handler. It checks for
+// handler type "soun" after version, flags, and reserved fields.
 func isAudioHandler(r io.ReadSeeker, hdlr Atom) bool {
 	if r == nil {
 		return false
@@ -63,14 +58,11 @@ func isAudioHandler(r io.ReadSeeker, hdlr Atom) bool {
 	return string(data[8:12]) == "soun"
 }
 
-// Matches reports whether header, which should hold at least the first 12 bytes
-// of a file, looks like an MPEG-4 file.
+// Matches reports whether header looks like an MPEG-4 file. Header must hold at
+// least the first 8 bytes of the file.
 //
-// A file normally begins with an "ftyp" atom, which names the brands it
-// conforms to, but that atom is optional and a file may open with the movie box
-// or the media data instead. Any of the atoms that can come first is accepted,
-// since all of them are distinctive enough that no other container this module
-// reads starts with one.
+// An "ftyp" atom is optional. "moov", "mdat", "free", "skip", and "wide" are
+// also accepted as first atoms.
 func Matches(header []byte) bool {
 	if len(header) < 8 {
 		return false
@@ -93,18 +85,15 @@ func Open(path string) (*File, error) {
 	return Read(r)
 }
 
-// Read reads an MPEG-4 file from r, which must be seekable. A file with no
-// audio track is not an error: the metadata may still be readable, and an MP4
-// video file carries the same tags.
+// Read reads an MPEG-4 file from r. R must be seekable. Files without an audio
+// track are accepted. MP4 video files use the same tags.
 func Read(r io.ReadSeeker) (*File, error) {
 	atoms, err := Atoms(r)
 	if err != nil {
 		return nil, err
 	}
 
-	// A file of atoms that has no movie box is not an MPEG-4 file. Without this
-	// check any container whose atoms happen to parse would be accepted, such as
-	// a FLAC file.
+	// A file without a movie box is not an MPEG-4 file.
 	moov, ok := Find(atoms, "moov")
 	if !ok {
 		return nil, fmt.Errorf("%w: no moov atom", ErrNoFile)
@@ -125,30 +114,31 @@ func Read(r io.ReadSeeker) (*File, error) {
 
 	f.file = r
 	f.audio = readAudio(r, moov)
+	f.chapters = readChapters(r, moov)
 	return f, nil
 }
 
-// metadataList returns the iTunes metadata list of the movie box, which is
-// where the tags live. The second result is false for a file with no tags.
+// metadataList returns the iTunes metadata list in the movie box. The second
+// result is false when the file has no tags.
 func metadataList(moov Atom) (Atom, bool) { return moov.Path("udta", "meta", "ilst") }
 
-// Track atoms whose payload describes the audio stream.
+// Track atoms with audio stream data.
 const (
 	atomMovieHeader = "mvhd" // duration of the whole file
 	atomMediaHeader = "mdhd" // duration and timescale of one track
-	atomHandler     = "hdlr" // what kind of track this is
-	atomSampleEntry = "stsd" // codec, sample rate and channel count
+	atomHandler     = "hdlr" // track kind
+	atomSampleEntry = "stsd" // codec, sample rate, and channel count
 )
 
-// readAudio works out the properties of the audio stream. The first track with
-// an audio handler wins; a file with no audio track keeps the duration from the
-// movie header if there is one, and otherwise reports nothing.
+// readAudio returns the properties of the audio stream. It uses the first track
+// with an audio handler. Files without an audio track use the movie header
+// duration when present.
 func readAudio(r io.ReadSeeker, moov Atom) tag.Audio {
 	audio := tag.Audio{}
 
 	track, ok := audioTrack(r, moov)
 	if !ok {
-		// No audio track, so fall back to the length of the whole file.
+		// No audio track. Use the length of the whole file.
 		if mvhd, ok := moov.Path(atomMovieHeader); ok {
 			if data, err := mvhd.Data(r); err == nil {
 				audio.Duration = readMovieDuration(data)
@@ -157,8 +147,8 @@ func readAudio(r io.ReadSeeker, moov Atom) tag.Audio {
 		return audio
 	}
 
-	// The media header holds the timescale, which is what scales the duration
-	// from a count of units to seconds.
+	// The media header holds the timescale for conversion of duration units to
+	// seconds.
 	if mdhd, ok := track.Path("mdia", atomMediaHeader); ok {
 		if data, err := mdhd.Data(r); err == nil {
 			if timescale, units := readMediaDuration(data); timescale > 0 {
@@ -176,8 +166,7 @@ func readAudio(r io.ReadSeeker, moov Atom) tag.Audio {
 	return audio
 }
 
-// audioTrack returns the first track whose handler says it holds audio. A file
-// with both a video and an audio track has the audio one.
+// audioTrack returns the first track with an audio handler.
 func audioTrack(r io.ReadSeeker, moov Atom) (Atom, bool) {
 	for _, trak := range moov.Children {
 		if trak.Name != "trak" {
@@ -190,8 +179,7 @@ func audioTrack(r io.ReadSeeker, moov Atom) (Atom, bool) {
 	return Atom{}, false
 }
 
-// readMovieDuration returns the length of the whole file, from the movie header
-// atom.
+// readMovieDuration returns the file length from a movie header atom.
 func readMovieDuration(data []byte) time.Duration {
 	if len(data) < 4 {
 		return 0
@@ -202,7 +190,7 @@ func readMovieDuration(data []byte) time.Duration {
 		if len(data) < 16 {
 			return 0
 		}
-		// Four bytes of version and flags, then creation and modification.
+		// Four bytes of version and flags, then creation and modification times.
 		timescale := beUint32(data[12:16])
 		units := int64(beUint32(data[16:20]))
 		if timescale == 0 {
@@ -214,7 +202,7 @@ func readMovieDuration(data []byte) time.Duration {
 		if len(data) < 28 {
 			return 0
 		}
-		// The 64 bit version widens the creation and modification times.
+		// The 64 bit form widens creation and modification times.
 		timescale := beUint32(data[20:24])
 		units := int64(beUint64(data[24:32]))
 		if timescale == 0 {
@@ -227,8 +215,8 @@ func readMovieDuration(data []byte) time.Duration {
 	}
 }
 
-// readMediaDuration returns the timescale and the duration in those units, from
-// a media header atom.
+// readMediaDuration returns the timescale and duration units from a media
+// header atom.
 func readMediaDuration(data []byte) (timescale int, units int64) {
 	if len(data) < 4 {
 		return 0, 0
@@ -250,7 +238,7 @@ func readMediaDuration(data []byte) (timescale int, units int64) {
 	return timescale, units
 }
 
-// readSampleDescription reads the codec, channel count, sample rate and bitrate
+// readSampleDescription reads codec, channel count, sample rate, and bitrate
 // from the first entry of a sample description atom.
 func readSampleDescription(data []byte, audio *tag.Audio) {
 	if len(data) < 8 || data[0] != 0 {
@@ -261,24 +249,22 @@ func readSampleDescription(data []byte, audio *tag.Audio) {
 		return
 	}
 
-	// Each entry is itself an atom, whose header holds the length and the name of
-	// the codec. Only the first entry is read, which is the one a file with a
-	// single audio track uses.
+	// Each entry is an atom. Its header holds the length and codec name. Only the
+	// first entry is read.
 	entry, _, ok := readSubAtom(data, headerLen)
 	if !ok || len(entry) < 28 {
 		return
 	}
 	audio.Codec = atomName(data[headerLen+4 : headerLen+8])
 
-	// The sample entry format reserves eight bytes, then the audio fields follow:
-	// the channel count, the sample size, two more reserved fields, and the
-	// sample rate as a 16.16 fixed point number of which the integer half is the
-	// rate.
+	// The sample entry format has 8 reserved bytes, then audio fields: channel
+	// count, sample size, 2 more reserved fields, and sample rate as a 16.16
+	// fixed point number.
 	audio.Channels = int(binary16(entry[16:18]))
 	audio.BitsPerSample = int(binary16(entry[18:20]))
 	audio.SampleRate = int(binary16(entry[24:26]))
 
-	// The codec specific configuration follows the fixed fields.
+	// Codec specific configuration follows the fixed fields.
 	if extra, ok := childAtoms(entry[28:]); ok {
 		for _, atom := range extra {
 			switch atom.name {
@@ -293,8 +279,7 @@ func readSampleDescription(data []byte, audio *tag.Audio) {
 	}
 }
 
-// readSubAtom returns the payload of the atom at pos and the offset just past
-// it.
+// readSubAtom returns the payload of the atom at pos and the offset after it.
 func readSubAtom(data []byte, pos int) (payload []byte, next int, ok bool) {
 	if pos+headerLen > len(data) {
 		return nil, pos, false
@@ -306,8 +291,7 @@ func readSubAtom(data []byte, pos int) (payload []byte, next int, ok bool) {
 	return data[pos+headerLen : pos+length], pos + length, true
 }
 
-// childAtoms splits the payload of a sample entry into its nested atoms, which
-// is where the codec specific configuration lives.
+// childAtoms splits a sample entry payload into nested atoms.
 func childAtoms(data []byte) ([]subAtom, bool) {
 	var out []subAtom
 	for pos := 0; pos+headerLen <= len(data); {
@@ -330,8 +314,8 @@ type subAtom struct {
 	payload []byte
 }
 
-// readESDS reads the elementary stream descriptor, which is where an AAC stream
-// says what it is: the sample entry alone only names the container "mp4a".
+// readESDS reads the elementary stream descriptor. The sample entry alone names
+// only the container "mp4a".
 func readESDS(data []byte, audio *tag.Audio) {
 	if len(data) < 5 || data[0] != 0 {
 		return
@@ -341,8 +325,8 @@ func readESDS(data []byte, audio *tag.Audio) {
 	if rest[0] != tagESDescriptor {
 		return
 	}
-	// Past the size of the descriptor come a stream identifier and a flags byte,
-	// then the decoder configuration that describes the codec.
+	// Past the descriptor size are a stream identifier and a flags byte, then
+	// the decoder configuration.
 	rest, ok := descriptorBody(rest)
 	if !ok || len(rest) < esDescriptorHead {
 		return
@@ -357,10 +341,9 @@ func readESDS(data []byte, audio *tag.Audio) {
 		return
 	}
 
-	// The decoder configuration holds the object type indication, the stream
-	// type, a buffer size, the peak bitrate and the average bitrate. Only an
-	// audio stream of the expected object type and stream type says anything
-	// more.
+	// The decoder configuration holds object type, stream type, buffer size,
+	// peak bitrate, and average bitrate. Details after the bitrate apply only
+	// to audio streams with AAC object type.
 	objectType := rest[0]
 	streamType := rest[1] >> 2
 	audio.Bitrate = int(beUint32(rest[9:13]))
@@ -377,27 +360,26 @@ func readESDS(data []byte, audio *tag.Audio) {
 	}
 }
 
-// objectTypeAAC and streamTypeAudio are the only combinations the decoder
-// configuration details apply to.
+// objectTypeAAC and streamTypeAudio identify the decoder configurations with
+// audio details.
 const (
 	objectTypeAAC   = 0x40
 	streamTypeAudio = 0x05
-	// decoderConfigLen is the size of the fixed part of a decoder configuration:
-	// the object type, the stream type and buffer size byte, the buffer size, the
-	// peak bitrate and the average bitrate.
+	// decoderConfigLen is the fixed size of a decoder configuration: object type,
+	// stream type and buffer size byte, buffer size, peak bitrate, and average
+	// bitrate.
 	decoderConfigLen = 13
-	// explicitSamplingFrequency is the index that means the rate is spelled out
-	// in the following three bytes instead of being looked up in a table.
+	// explicitSamplingFrequency is the index for an explicit rate in the next 3
+	// bytes.
 	explicitSamplingFrequency = 0x0F
-	// sbrAudioObjectType and psAudioObjectType are the object types that say the
-	// stream also carries spectral band replication or parametric stereo.
+	// sbrAudioObjectType and psAudioObjectType mark streams with spectral band
+	// replication or parametric stereo.
 	sbrAudioObjectType = 5
 	psAudioObjectType  = 29
 )
 
-// readAudioSpecificConfig reads the audio specific configuration, which gives
-// the audio object type, and where it disagrees with the sample entry the sample
-// rate and channel count.
+// readAudioSpecificConfig reads the audio specific configuration. It sets the
+// audio object type, sample rate, and channel count.
 func readAudioSpecificConfig(data []byte, audio *tag.Audio) {
 	r := bits.New(data)
 
@@ -410,8 +392,8 @@ func readAudioSpecificConfig(data []byte, audio *tag.Audio) {
 		rate = int(r.Read(24))
 	}
 
-	// The object types 5 and 29 wrap the real one, and say the stream was
-	// upsampled from a lower rate, so the rate after them is the one to use.
+	// Object types 5 and 29 wrap the actual type. The rate after them applies.
+	// The stream was upsampled from a lower rate.
 	extension := false
 	if objectType == sbrAudioObjectType || objectType == psAudioObjectType {
 		extension = true
@@ -424,8 +406,8 @@ func readAudioSpecificConfig(data []byte, audio *tag.Audio) {
 		channels = int(r.Read(4))
 	}
 
-	// The name players quote is the object type of the container followed by the
-	// audio object type, as in "mp4a.40.2".
+	// The codec name is the container type plus the audio object type, as in
+	// "mp4a.40.2".
 	audio.Codec = fmt.Sprintf("%s.%d", audio.Codec, objectType)
 
 	if rate > 0 {
@@ -437,8 +419,8 @@ func readAudioSpecificConfig(data []byte, audio *tag.Audio) {
 	_ = extension
 }
 
-// readAudioObjectType reads the five bit audio object type, which escapes to six
-// more bits when it is 31.
+// readAudioObjectType reads the 5 bit audio object type. Value 31 escapes to 6
+// more bits.
 func readAudioObjectType(r *bits.Reader) int {
 	n := int(r.Read(5))
 	if n == 31 {
@@ -447,20 +429,20 @@ func readAudioObjectType(r *bits.Reader) int {
 	return n
 }
 
-// MPEG-4 descriptor tags, which are a byte identifying the kind of descriptor.
+// MPEG-4 descriptor tags. Each tag is one byte for the descriptor kind.
 const (
 	tagESDescriptor    = 0x03
 	tagDecoderConfig   = 0x04
 	tagDecoderSpecific = 0x05
-	// esDescriptorHead is what follows the size of an elementary stream
-	// descriptor before the decoder configuration: a two byte stream identifier
-	// and a flags byte.
+	// esDescriptorHead is the bytes after an elementary stream descriptor size
+	// before the decoder configuration: a 2 byte stream identifier and a flags
+	// byte.
 	esDescriptorHead = 3
 )
 
-// descriptorBody returns the body of the descriptor at the start of data, which
-// begins with a one byte tag and a variable length size. ok is false when the
-// size runs past the end of data, which means the descriptor is malformed.
+// descriptorBody returns the body of the descriptor at the start of data. Data
+// starts with a 1 byte tag and a variable length size. Ok is false when the
+// size exceeds the data length.
 func descriptorBody(data []byte) (body []byte, ok bool) {
 	if len(data) < 2 {
 		return nil, false
@@ -482,30 +464,28 @@ func descriptorBody(data []byte) (body []byte, ok bool) {
 	return data[pos : pos+size], true
 }
 
-// readALAC reads the ALAC magic cookie, which holds the real stream parameters.
-// The sample entry often just repeats the defaults, so this is the better
-// source.
+// readALAC reads the ALAC magic cookie. It sets bits per sample, channels,
+// bitrate, sample rate, and encoder.
 func readALAC(data []byte, audio *tag.Audio) {
 	if len(data) < alacCookieLen {
 		return
 	}
-	// Past the version and flags field the cookie is a frame length, a format
-	// version, the sample size, three packing hints, the channel count, the
-	// longest run of two equal samples, the largest frame, the average bitrate
-	// and the sample rate.
+	// Past the version and flags field the cookie holds frame length, format
+	// version, sample size, packing fields, channel count, longest run of equal
+	// samples, largest frame, average bitrate, and sample rate.
 	r := bits.New(data[4:])
-	r.Skip(32) // frame length, which says nothing about the stream
+	r.Skip(32) // frame length
 	if r.Read(8) != 0 {
-		// A nonzero format version means the layout may differ.
+		// Nonzero format version means the layout may differ.
 		return
 	}
 	audio.BitsPerSample = int(r.Read(8))
-	r.Skip(8 + 8 + 8) // packing hints
+	r.Skip(8 + 8 + 8) // packing fields
 	if channels := r.Read(8); channels > 0 {
 		audio.Channels = int(channels)
 	}
-	r.Skip(16) // the longest run of two consecutive equal samples
-	r.Skip(32) // the largest frame a decoder needs to buffer
+	r.Skip(16) // longest run of equal samples
+	r.Skip(32) // largest frame size
 	if bitrate := r.Read(32); bitrate > 0 {
 		audio.Bitrate = int(bitrate)
 	}
@@ -516,11 +496,10 @@ func readALAC(data []byte, audio *tag.Audio) {
 }
 
 // alacCookieLen is the size of an ALAC magic cookie: a version and flags field
-// followed by 24 bytes of stream parameters.
+// plus 24 bytes of stream parameters.
 const alacCookieLen = 4 + 24
 
-// readAC3 reads the AC-3 configuration atom, which is how a Dolby Digital
-// stream states its channel count and bitrate.
+// readAC3 reads the AC-3 configuration atom. It sets channel count and bitrate.
 func readAC3(data []byte, audio *tag.Audio) {
 	if len(data) < 4 {
 		return
@@ -539,17 +518,17 @@ func readAC3(data []byte, audio *tag.Audio) {
 	}
 }
 
-// ac3Channels maps an AC-3 audio coding mode to a channel count.
+// ac3Channels maps AC-3 audio coding mode to channel count.
 var ac3Channels = []int{2, 1, 2, 3, 3, 4, 4, 5}
 
-// ac3Bitrates maps an AC-3 bit rate code to a bitrate in kbit/s.
+// ac3Bitrates maps AC-3 bit rate code to bitrate in kbit/s.
 var ac3Bitrates = []int{
 	32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384,
 	448, 512, 576, 640,
 }
 
-// sampleRatesFromIndex maps an MPEG-4 sampling frequency index to a rate in Hz.
-// Index 15 means the rate is stated explicitly, which this package does not read.
+// sampleRatesFromIndex maps MPEG-4 sampling frequency index to rate in Hz.
+// Index 15 means the rate is stated explicitly.
 var sampleRatesFromIndex = []int{
 	96000, 88200, 64000, 48000, 44100, 32000,
 	24000, 22050, 16000, 12000, 11025, 8000, 7350,
@@ -567,6 +546,5 @@ func binary16(b []byte) uint16 {
 	return uint16(b[0])<<8 | uint16(b[1])
 }
 
-// round64 rounds to the nearest whole, which is how the ISO specification
-// defines the timescale divisions.
+// round64 rounds to the nearest integer.
 func round64(f float64) int64 { return int64(f + 0.5) }

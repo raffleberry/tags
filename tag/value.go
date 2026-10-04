@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// Tag is a multi-valued set of metadata fields keyed by lowercase names. Fields
-// a format records as single valued still produce a one element slice, so all
-// accessors are multi-valued and callers never have to special case a format.
+// Tag is a multi-valued set of metadata fields keyed by lowercase names.
+// Single-valued format fields use a one element slice. All accessors return
+// multiple values.
 type Tag map[string][]string
 
 // New returns a Tag holding the given fields, in order.
@@ -21,8 +21,8 @@ func New(pairs ...string) Tag {
 	return t
 }
 
-// Value returns the first value stored under key, or "" when the key is absent
-// or empty.
+// Value returns the first non-empty value under key. It returns "" when the
+// key is absent or all values are empty.
 func (t Tag) Value(key string) string {
 	for _, v := range t[key] {
 		if v != "" {
@@ -51,8 +51,8 @@ func (t Tag) Int(key string) (int, bool) {
 	return n, true
 }
 
-// Bool reports whether key holds a value understood as true, which is one of
-// "1", "true" or "yes" regardless of case.
+// Bool reports whether key is "1", "true" or "yes". Comparison ignores case
+// and surrounding space.
 func (t Tag) Bool(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(t.Value(key))) {
 	case "1", "true", "yes":
@@ -75,9 +75,9 @@ func (t Tag) Set(key string, values ...string) {
 	t[key] = slices.Clone(values)
 }
 
-// SetDefault stores value under key only when the key is not already present.
-// It reports whether the value was stored. Format readers use it to layer a
-// less reliable source, such as an ID3v1 tag, underneath a richer one.
+// SetDefault stores value under key when the key has no non-empty value. It
+// reports whether the value was stored. Format readers use it to add data from
+// a secondary source. Example: ID3v1 data when ID3v2 data is present.
 func (t Tag) SetDefault(key, value string) bool {
 	if t.Value(key) != "" {
 		return false
@@ -101,7 +101,7 @@ func (t Tag) Clone() Tag {
 	return c
 }
 
-// Bool renders b the way the ID3v2.3 specification requires, as "1" or "0".
+// Bool formats b per the ID3v2.3 specification, as "1" or "0".
 func Bool(b bool) string {
 	if b {
 		return "1"

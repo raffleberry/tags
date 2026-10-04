@@ -40,16 +40,14 @@ func TestAudioProperties(t *testing.T) {
 		bitrate    int
 		depth      int
 	}{
-		// AAC in an MP4 container, which is what an .m4a file usually is.
+		// AAC in an MP4 container.
 		{"has-tags.m4a", "mp4a.40.2", "", 3.70794, 44100, 2, 2914, 16},
 		{"no-tags.m4a", "mp4a.40.2", "", 3.70794, 44100, 2, 2914, 16},
-		// Apple Lossless, whose parameters live in a magic cookie rather than in
-		// the sample entry.
+		// Apple Lossless with parameters in a magic cookie.
 		{"alac.m4a", "alac", "ALAC", 3.68472, 44100, 2, 2764, 16},
-		// An audiobook, at a lower sample rate and a much higher bitrate.
+		// Audiobook file.
 		{"ep7.m4b", "mp4a.40.2", "", 2.02014, 44100, 2, 125591, 16},
-		// A 47 hour audiobook, whose duration overflows a 32 bit field and so is
-		// stored in the 64 bit form of the media header.
+		// 47 hour audiobook with 64 bit media header duration.
 		{"nero-chapters.m4b", "mp4a.40.2", "", 169022.694, 22050, 2, 62794, 16},
 	}
 
@@ -80,15 +78,15 @@ func TestAudioProperties(t *testing.T) {
 	}
 }
 
-// TestNoAudioTrack covers a file with tags but no audio track, where the stream
-// properties are absent but the metadata is still readable.
+// TestNoAudioTrack covers a file with tags and no audio track. Stream
+// properties are empty. Metadata remains readable.
 func TestNoAudioTrack(t *testing.T) {
 	f := open(t, "64bit.mp4")
 
 	if audio := f.Audio(); audio.SampleRate != 0 || audio.Channels != 0 {
 		t.Errorf("Audio() = %v, want nothing for a file with no audio track", audio)
 	}
-	// The one tag it does have is a flag.
+	// The file has one flag tag.
 	if got, want := f.Tags().Value(tag.Compilation), "1"; got != want {
 		t.Errorf("compilation = %q, want %q", got, want)
 	}
@@ -105,8 +103,7 @@ func TestTags(t *testing.T) {
 		t.Errorf("encodersettings = %q, want %q", got, want)
 	}
 
-	// A freeform field is keyed by the application and field names inside the
-	// atom, which is how iTunes normalization data is stored.
+	// Freeform fields use application and field names as the key.
 	if got := tags.Value("----:com.apple.itunes:itunnorm"); got == "" {
 		t.Error("itunnorm is missing, want the iTunes normalization data")
 	}
@@ -120,7 +117,7 @@ func TestNoTags(t *testing.T) {
 	if got := f.Pictures(); len(got) != 0 {
 		t.Errorf("Pictures() = %v, want none", got)
 	}
-	// The stream is still readable.
+	// Stream data remains readable without tags.
 	if f.Audio().SampleRate == 0 {
 		t.Error("SampleRate = 0, want the stream to be readable without tags")
 	}
@@ -137,8 +134,7 @@ func TestPictures(t *testing.T) {
 		mime string
 		size int
 	}{
-		// A two pixel PNG and a small JPEG, which the file carries as two
-		// values of the same atom.
+		// One PNG and one JPEG in the same atom.
 		{"image/png", 79},
 		{"image/jpeg", 287},
 	}
@@ -155,8 +151,8 @@ func TestPictures(t *testing.T) {
 	}
 }
 
-// TestPictureWithNameAtom covers a file whose cover atom has an extra "name"
-// atom before the image, which must be stepped over rather than read as data.
+// TestPictureWithNameAtom covers a cover atom with an extra "name" atom before
+// the image data.
 func TestPictureWithNameAtom(t *testing.T) {
 	f := open(t, "covr-with-name.m4a")
 
@@ -173,7 +169,7 @@ func TestPictureWithNameAtom(t *testing.T) {
 func TestAtomTree(t *testing.T) {
 	f := open(t, "has-tags.m4a")
 
-	// The "ftyp" atom is first in essentially every MPEG-4 file.
+	// The "ftyp" atom is first in most MPEG-4 files.
 	if len(f.Atoms()) == 0 {
 		t.Fatal("Atoms() is empty, want the top level atoms")
 	}
@@ -196,10 +192,10 @@ func TestAtomTree(t *testing.T) {
 	}
 }
 
-// Test64BitAtomLengths covers atoms whose length is written as 64 bits, which
-// doubles the size of the header and shifts everything after it.
+// Test64BitAtomLengths covers atoms with 64 bit lengths. The header is then
+// twice the size.
 func Test64BitAtomLengths(t *testing.T) {
-	// This file is entirely built from 64 bit atoms.
+	// All atoms in this file use 64 bit lengths.
 	f := open(t, "64bit.mp4")
 
 	moov, ok := Find(f.Atoms(), "moov")
@@ -209,7 +205,7 @@ func Test64BitAtomLengths(t *testing.T) {
 	if !moov.longLength {
 		t.Error("moov does not record a 64 bit length, want one")
 	}
-	// The tags live inside it, so reading them proves the header size was right.
+	// Tags are inside moov. Reading them checks the header size.
 	ilst, ok := moov.Path("udta", "meta", "ilst")
 	if !ok {
 		t.Fatal("no ilst atom, want one below moov")
@@ -233,9 +229,8 @@ func mustOpen(t *testing.T, name string) *os.File {
 	return f
 }
 
-// TestRejectedAtomHeaders covers the malformed atom headers a truncated or
-// damaged file can hold. Reading past one of these would take the following
-// bytes for the atom payload.
+// TestRejectedAtomHeaders covers malformed atom headers in truncated or damaged
+// files.
 func TestRejectedAtomHeaders(t *testing.T) {
 	tests := []struct {
 		name string
@@ -259,14 +254,13 @@ func TestRejectedAtomHeaders(t *testing.T) {
 	}
 }
 
-// TestZeroLengthNestedAtom covers a zero length atom below the top level, which
-// the specification does not allow: with no length there is no way to find the
-// atom after it. Such an atom ends the container rather than being misread, and
-// the atoms already found are kept.
+// TestZeroLengthNestedAtom covers a zero length atom below the top level. Zero
+// length is not allowed there. Parsing stops at the container end. Atoms found
+// so far are kept.
 func TestZeroLengthNestedAtom(t *testing.T) {
 	file := []byte("\x00\x00\x00\x18moov" +
-		"\x00\x00\x00\x08trak" + // the first child, which is well formed
-		"\x00\x00\x00\x00trak" + // runs to the end of the file, which is not
+		"\x00\x00\x00\x08trak" + // well formed first child
+		"\x00\x00\x00\x00trak" + // zero length child
 		"\x00\x00\x00\x08trak")
 
 	atoms, err := Atoms(bytes.NewReader(file))
@@ -282,8 +276,8 @@ func TestZeroLengthNestedAtom(t *testing.T) {
 	}
 }
 
-// TestZeroLengthAtom covers the one zero length that is legal: a top level atom
-// that runs to the end of the file.
+// TestZeroLengthAtom covers a legal zero length: a top level atom to the end of
+// the file.
 func TestZeroLengthAtom(t *testing.T) {
 	file := append([]byte("\x00\x00\x00\x00atom"), make([]byte, 40)...)
 
@@ -298,8 +292,7 @@ func TestZeroLengthAtom(t *testing.T) {
 		t.Errorf("Length = %d, want %d", got, want)
 	}
 
-	// A zero length atom fills the rest of the file, so it has a payload but no
-	// declared size of its own.
+	// A zero length atom fills the rest of the file.
 	data, err := atoms[0].Data(bytes.NewReader(file))
 	if err != nil {
 		t.Fatalf("Data() = %v", err)
@@ -309,8 +302,8 @@ func TestZeroLengthAtom(t *testing.T) {
 	}
 }
 
-// TestTrailingGarbage covers a file with bytes after the last atom that are too
-// short to be one, which is common enough to be worth tolerating.
+// TestTrailingGarbage covers a file with trailing bytes too short for an atom.
+// The leading atoms are returned.
 func TestTrailingGarbage(t *testing.T) {
 	data := []byte("\x00\x00\x00\x08data" + "\x00\x00")
 	atoms, err := Atoms(bytes.NewReader(data))
@@ -323,7 +316,7 @@ func TestTrailingGarbage(t *testing.T) {
 }
 
 func TestNotMP4(t *testing.T) {
-	// A FLAC file is audio, but it is not built from atoms.
+	// FLAC files are not built from atoms.
 	if _, err := Open(dataDir + "silence-44-s.flac"); err == nil {
 		t.Error("Open(flac) = nil error, want a failure")
 	}
@@ -349,8 +342,7 @@ func TestMatches(t *testing.T) {
 	}
 }
 
-// openHeader returns the first bytes of a test file, which is what a sniffing
-// reader gets to look at.
+// openHeader returns the first bytes of a test file.
 func openHeader(t *testing.T, name string) []byte {
 	t.Helper()
 	f := mustOpen(t, name)
@@ -361,8 +353,8 @@ func openHeader(t *testing.T, name string) []byte {
 	return header
 }
 
-// TestTruncatedFile covers a file cut short part way through, whose last atom
-// claims more bytes than are there.
+// TestTruncatedFile covers a file cut short inside an atom. The atom claims
+// more bytes than are present.
 func TestTruncatedFile(t *testing.T) {
 	atoms, err := Atoms(bytes.NewReader([]byte("\x00\x00\x00\x20moov\x00\x00")))
 	if err != nil {
@@ -371,7 +363,7 @@ func TestTruncatedFile(t *testing.T) {
 	if len(atoms) != 1 || atoms[0].Name != "moov" {
 		t.Errorf("Atoms() = %v, want one moov atom", atoms)
 	}
-	// Asking for its payload yields what there is, rather than failing.
+	// Data returns the bytes present without failure.
 	data, err := atoms[0].Data(bytes.NewReader([]byte("\x00\x00\x00\x20moov\x00\x00")))
 	if err != nil {
 		t.Fatalf("Data() = %v", err)

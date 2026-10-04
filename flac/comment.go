@@ -10,39 +10,32 @@ import (
 	"github.com/raffleberry/tags/tag"
 )
 
-// VorbisComment is the comment block of a FLAC file, which holds the tags as
-// "KEY=value" lines. The same format is used by Ogg Vorbis and by Opus.
+// VorbisComment holds tags as "KEY=value" lines. Ogg Vorbis and Opus use the same format.
 type VorbisComment struct {
 	// Vendor is the name of the program that wrote the file.
 	Vendor string
-	// Fields holds the comments in file order, keeping duplicates, which the
-	// format allows and which a multi valued artist needs.
+	// Fields holds comments in file order. It keeps duplicate keys.
 	Fields []VorbisField
 }
 
 // VorbisField is one "KEY=value" comment.
 type VorbisField struct {
-	// Key is the name of the field, conventionally uppercase. A line with no
-	// equals sign is not a field at all and is not kept.
+	// Key is the field name. It is conventionally uppercase. Lines without "=" are ignored.
 	Key string
-	// Value is everything after the first equals sign, which may itself contain
-	// more of them.
+	// Value is the text after the first "=". It can contain "=".
 	Value string
 }
 
-// ParseVorbisComment decodes a Vorbis comment block. Unlike the Ogg carriers, a
-// FLAC comment block has no framing bit after the last field.
+// ParseVorbisComment decodes a Vorbis comment block. A FLAC block has no framing bit.
 func ParseVorbisComment(data []byte) (*VorbisComment, error) {
 	return ReadVorbisComment(bytes.NewReader(data))
 }
 
-// ReadVorbisComment decodes a Vorbis comment block from r, which is left at the
-// end of the block.
+// ReadVorbisComment decodes a Vorbis comment block from r. r is left at the end of the block.
 //
-// The block is a vendor string, a count of fields, and that many fields, each a
-// string of the form "KEY=value". The count is advisory: some writers state more
-// fields than they wrote, so the fields that are present are read even when the
-// count runs past the end of the data.
+// The block holds a vendor string, a field count, and fields. Each field
+// is "KEY=value". The count can be wrong. Present fields are read even
+// when the count is too large.
 func ReadVorbisComment(r io.Reader) (*VorbisComment, error) {
 	c := &VorbisComment{}
 
@@ -61,16 +54,14 @@ func ReadVorbisComment(r io.Reader) (*VorbisComment, error) {
 	for range count {
 		var line string
 		if line, err = readCountedString(r); err != nil {
-			// A field that cannot be read ends the block. Anything read before
-			// it is still worth reporting.
+			// A bad field ends the block. Earlier fields are kept.
 			if len(c.Fields) == 0 {
 				return nil, fmt.Errorf("flac: %s: reading a field: %w", ErrBlock, err)
 			}
 			break
 		}
 		key, value, found := strings.Cut(line, "=")
-		// A comment with no equals sign has no name for its value, so it is not
-		// one this package can report. The specification says to ignore it.
+		// Lines without "=" are ignored.
 		if !found {
 			continue
 		}
@@ -79,9 +70,7 @@ func ReadVorbisComment(r io.Reader) (*VorbisComment, error) {
 	return c, nil
 }
 
-// readCountedString reads a length followed by that many bytes. A length larger
-// than what is left in the block means the block is malformed, and reading on
-// would take whatever follows it for the value.
+// readCountedString reads a length followed by that many bytes. It reports an error when the length exceeds the limit.
 func readCountedString(r io.Reader) (string, error) {
 	var lengthBytes [4]byte
 	if _, err := io.ReadFull(r, lengthBytes[:]); err != nil {
@@ -99,9 +88,7 @@ func readCountedString(r io.Reader) (string, error) {
 	return string(buf), nil
 }
 
-// commentKeys maps the Vorbis comment names that have a common meaning onto the
-// normalized key. Names are conventionally uppercase, and are compared in lower
-// case, so a file that uses lowercase names works too.
+// commentKeys maps Vorbis comment names to normalized keys. Names are compared in lower case.
 var commentKeys = map[string]string{
 	"TITLE":                      tag.Title,
 	"SUBTITLE":                   tag.Subtitle,
@@ -163,9 +150,8 @@ var commentKeys = map[string]string{
 
 // Common renders the comments as normalized [tag.Tag] fields.
 //
-// A name with a known common meaning is folded onto that key, and anything else
-// is kept under its own lowercased name, so no comment is lost. Artwork is not
-// text and is left out; see [File.Pictures].
+// Known names map to common keys. Other names are kept lowercased.
+// Artwork is excluded. See [File.Pictures].
 func (c *VorbisComment) Common() tag.Tag {
 	out := tag.Tag{}
 	if c == nil {
@@ -182,8 +168,7 @@ func (c *VorbisComment) Common() tag.Tag {
 		out.Add(key, field.Value)
 	}
 
-	// A track comment may hold "3/11" where the total also has a comment of its
-	// own. Split the one and leave the other alone when it is already there.
+	// Split "3/11" track values into position and total. Keep existing totals.
 	if position, total := tag.SplitTotal(out.Value(tag.Track)); total != "" {
 		out.SetDefault(tag.TrackTotal, total)
 		if position != "" {

@@ -1,14 +1,16 @@
-// Package bits provides a most significant bit first reader, the bit order
-// every compressed audio header in this module is written in.
+// Package bits provides a most significant bit first reader.
+// Compressed audio headers in this module use this bit order.
 package bits
 
 import "errors"
 
-// ErrShort is returned when a read runs past the end of the data.
+// ErrShort indicates a read exceeded the end of the data.
 var ErrShort = errors.New("bits: read past end of data")
 
-// Reader reads fields of up to 32 bits from a byte slice, most significant bit
-// first. The zero value is not usable; obtain one from [New].
+// Reader reads fields of up to 32 bits from a byte slice.
+// Bits are most significant first.
+// The zero value is not usable.
+// Use [New].
 type Reader struct {
 	data []byte
 	// pos is the bit offset into data.
@@ -18,13 +20,14 @@ type Reader struct {
 // New returns a Reader over data.
 func New(data []byte) *Reader { return &Reader{data: data} }
 
-// Read returns the next n bits as an unsigned integer, 0 to 32 of them. Bits
-// beyond the end of the data read as zero.
+// Read returns the next n bits as an unsigned integer.
+// N is 0 to 32.
+// Bits beyond the end of the data read as zero.
 func (r *Reader) Read(n int) uint32 {
 	var v uint32
 	for ; n > 0; n-- {
 		if r.pos >= len(r.data)*8 {
-			// Keep going so the caller still ends up at a sensible position.
+			// Continue to advance the position.
 			v <<= 1
 			r.pos++
 			continue
@@ -52,7 +55,7 @@ func (r *Reader) Skip(n int) { r.pos += n }
 // Pos returns the current bit offset.
 func (r *Reader) Pos() int { return r.pos }
 
-// Aligned reports whether the reader sits on a byte boundary.
+// Aligned reports whether the reader is on a byte boundary.
 func (r *Reader) Aligned() bool { return r.pos%8 == 0 }
 
 // Left returns how many bits remain unread.

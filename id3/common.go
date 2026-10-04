@@ -6,10 +6,7 @@ import (
 	"github.com/raffleberry/tags/tag"
 )
 
-// frameKeys maps the ID3 frame IDs that have a common equivalent onto the
-// normalized key. The v2.2 name is listed first where the two versions spell
-// the frame differently; the ID3v2.4 name follows, which is also what ID3v2.3
-// writers commonly use for the same field.
+// frameKeys maps ID3 frame IDs to normalized keys.
 var frameKeys = map[string]string{
 	// Titles and names.
 	"TIT2": tag.Title, "TT2": tag.Title,
@@ -34,8 +31,7 @@ var frameKeys = map[string]string{
 	"TMED": "media",
 	"TLAN": tag.Language, "TLA": tag.Language,
 
-	// Dates. TYER and TDAT are the ID3v2.3 spelling of what v2.4 records in a
-	// single TDRC frame.
+	// Dates. TYER and TDAT are ID3v2.3 fields. TDRC is the ID3v2.4 field.
 	"TDRC": tag.Date,
 	"TYER": tag.Date, "TYE": tag.Date,
 	"TDAT": "date_day_month",
@@ -63,15 +59,13 @@ var frameKeys = map[string]string{
 	"TCAT": "category",
 	"WFED": "podcasturl",
 
-	// Identifiers, which ID3 carries in binary frames.
+	// Identifiers in binary frames.
 	"MVNM": "movementname",
 	"MVIN": "movementnumber",
 	"GRP1": "grouping",
 }
 
-// userTextKeys maps the description of the TXXX frames that other formats
-// record under a name of their own. Descriptions not listed here become the
-// normalized key themselves, lowercased.
+// userTextKeys maps TXXX descriptions to normalized keys. Unlisted descriptions become lowercased keys.
 var userTextKeys = map[string]string{
 	"replaygain_track_gain":        tag.ReplayGainTrackGain,
 	"replaygain_track_peak":        tag.ReplayGainTrackPeak,
@@ -92,13 +86,9 @@ var userTextKeys = map[string]string{
 	"script":                       tag.Script,
 }
 
-// Common renders the tag as normalized [tag.Tag] fields.
+// Common returns the tag as normalized [tag.Tag] fields.
 //
-// Frames whose ID has no common equivalent are kept under a lowercased name:
-// the frame ID itself for plain text frames, the TXXX description for user
-// text, and "comment:<description>" or "lyrics:<description>" for the
-// described variants of COMM and USLT. Artwork is not text and is left out;
-// see [Tag.Pictures].
+// Frames without a common key use a lowercased name: the frame ID, the TXXX description, or "comment:<description>" and "lyrics:<description>" for COMM and USLT. Artwork is excluded. See [Tag.Pictures].
 func (t *Tag) Common() tag.Tag {
 	out := tag.Tag{}
 	if t == nil {
@@ -108,7 +98,7 @@ func (t *Tag) Common() tag.Tag {
 	for _, f := range t.Frames {
 		switch {
 		case f.Name == FrameGenre || f.Name == FrameGenreOld:
-			// TCON packs numbers and names into its values; resolve both.
+			// TCON values hold numbers and names.
 			out.Add(tag.Genre, ParseGenres(f.Text)...)
 
 		case f.Name == FrameUserText || f.Name == frameUserText2:
@@ -146,9 +136,7 @@ func (t *Tag) Common() tag.Tag {
 	return out
 }
 
-// addDescribed files a COMM or USLT frame under its bare common key when it has
-// no description, and under a "key:description" key when it does, so that the
-// many comments iTunes files under a name do not bury the real one.
+// addDescribed stores a COMM or USLT frame under the bare key without a description and under "key:description" with one.
 func addDescribed(out tag.Tag, key string, f Frame) {
 	desc := strings.TrimSpace(f.Desc)
 	if desc == "" {
@@ -158,8 +146,7 @@ func addDescribed(out tag.Tag, key string, f Frame) {
 	out.Add(key+":"+strings.ToLower(desc), f.Text...)
 }
 
-// finishPositions splits the "3/11" values of track and disc into a position
-// and a total, and drops the parts the file never recorded.
+// finishPositions splits "number/total" track and disc values into position and total. Missing parts are removed.
 func finishPositions(out tag.Tag) {
 	for _, key := range []struct{ position, total string }{
 		{tag.Track, tag.TrackTotal},

@@ -22,11 +22,10 @@ func TestOpen(t *testing.T) {
 		title   string
 		duraton float64
 	}{
-		// One file per container, all carrying a title.
+		// One file per container.
 		{"silence-44-s.mp3", tag.MP3, "Silence", 3.7675},
 		{"silence-44-s.flac", tag.FLAC, "Silence", 3.68472},
-		// This MP4 file has no title, so the artist stands in for the fact that
-		// its tags were read.
+		// This MP4 file has no title.
 		{"has-tags.m4a", tag.M4A, "", 3.70794},
 	}
 
@@ -46,8 +45,8 @@ func TestOpen(t *testing.T) {
 			if tt.title != "" && f.Tags().Value(tag.Title) != tt.title {
 				t.Errorf("title = %q, want %q", f.Tags().Value(tag.Title), tt.title)
 			}
-			// The duration comes from a different source in each format, so it is
-			// only checked loosely here; the packages test it exactly.
+			// Duration sources differ by format. Duration is checked within 0.01
+			// seconds here. Format packages test exact values.
 			if d := f.Audio().Duration.Seconds(); d < tt.duraton-0.01 || d > tt.duraton+0.01 {
 				t.Errorf("Duration = %v s, want ~%v s", d, tt.duraton)
 			}
@@ -55,8 +54,8 @@ func TestOpen(t *testing.T) {
 	}
 }
 
-// TestReadFromReader covers the same files through a reader rather than a path,
-// which is how a caller reads from an archive or a network stream.
+// TestReadFromReader checks the same files through a reader. It covers reads
+// from archives or network streams.
 func TestReadFromReader(t *testing.T) {
 	for _, name := range []string{"silence-44-s.mp3", "has-tags.m4a", "silence-44-s.flac"} {
 		t.Run(name, func(t *testing.T) {
@@ -79,8 +78,8 @@ func TestReadFromReader(t *testing.T) {
 	}
 }
 
-// TestDetect covers identifying a file without reading all of it, and checks
-// that the extension is not what decides.
+// TestDetect checks file identification without a full read. Content
+// determines the result. The extension does not.
 func TestDetect(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -91,7 +90,7 @@ func TestDetect(t *testing.T) {
 		{"silence-44-s.flac", tag.FLAC},
 		{"has-tags.m4a", tag.M4A},
 		{"ep7.m4b", tag.M4A},
-		// A file that is MP4 audio despite the extension, and the reverse.
+		// An MP4 file with an .mp4 extension.
 		{"64bit.mp4", tag.M4A},
 	}
 
@@ -108,13 +107,12 @@ func TestDetect(t *testing.T) {
 	}
 }
 
-// TestDetectWrongExtension covers a file whose content decides the format, which
-// is the whole point of sniffing rather than trusting the name.
+// TestDetectWrongExtension checks that content determines the format. The file
+// name does not.
 func TestDetectWrongExtension(t *testing.T) {
 	dir := t.TempDir()
 
-	// A FLAC file named as an MP3, which is what a mislabelled download looks
-	// like.
+	// A FLAC file named as an MP3.
 	wrong := filepath.Join(dir, "not-really.mp3")
 	copyFile(t, dataDir+"silence-44-s.flac", wrong)
 
@@ -126,7 +124,7 @@ func TestDetectWrongExtension(t *testing.T) {
 		t.Errorf("Detect() = %v, want %v", got, tag.FLAC)
 	}
 
-	// Reading it goes the same way, so the tags are FLAC tags.
+	// Reading it returns FLAC tags.
 	f, err := Open(wrong)
 	if err != nil {
 		t.Fatalf("Open() = %v", err)
@@ -150,8 +148,8 @@ func copyFile(t *testing.T, from, to string) {
 	}
 }
 
-// TestUnknownFormat covers data that is none of the containers this package
-// reads, which has to fail rather than be read as something.
+// TestUnknownFormat checks data that matches no supported container. Read
+// returns an error.
 func TestUnknownFormat(t *testing.T) {
 	tests := []struct {
 		name string
@@ -161,7 +159,7 @@ func TestUnknownFormat(t *testing.T) {
 		{"one byte", []byte("x")},
 		{"shorter than a header", []byte("ID3\x04\x00\x00")},
 		{"text", []byte("this is a text file, not audio at all")},
-		// A PNG header, which is a real file format but not one this reads.
+		// A PNG header. It is a valid file format. This package does not read it.
 		{"png", []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0}},
 	}
 
@@ -175,8 +173,7 @@ func TestUnknownFormat(t *testing.T) {
 	}
 }
 
-// TestOpenAs covers insisting on a format, which is what a caller walking a
-// directory of one kind of file wants.
+// TestOpenAs checks reading with a required format.
 func TestOpenAs(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -186,7 +183,7 @@ func TestOpenAs(t *testing.T) {
 		{"silence-44-s.mp3", tag.MP3, false},
 		{"silence-44-s.flac", tag.FLAC, false},
 		{"has-tags.m4a", tag.M4A, false},
-		// The wrong format must be reported rather than read as something else.
+		// A wrong format returns an error.
 		{"silence-44-s.mp3", tag.FLAC, true},
 		{"silence-44-s.flac", tag.MP3, true},
 		// A format this package does not read.
@@ -212,16 +209,15 @@ func TestOpenAs(t *testing.T) {
 	}
 }
 
-// TestCommonView checks that the same field arrives under the same key whichever
-// container it came from, which is what the normalized tag set is for.
+// TestCommonView checks that the same field uses the same key in each
+// container.
 func TestCommonView(t *testing.T) {
 	tests := []struct {
 		name  string
 		field string
 		want  string
 	}{
-		// A title written three ways: an ID3 frame, a Vorbis comment and an
-		// iTunes atom.
+		// A title in three forms: an ID3 frame, a Vorbis comment, an iTunes atom.
 		{"silence-44-s.mp3", tag.Title, "Silence"},
 		{"silence-44-s.flac", tag.Title, "Silence"},
 		{"id3v22-test.mp3", tag.Artist, "Anais Mitchell"},
@@ -240,8 +236,7 @@ func TestCommonView(t *testing.T) {
 	}
 }
 
-// TestNormalizedKeys checks that no key is uppercase, whatever the source
-// spelled it.
+// TestNormalizedKeys checks that all keys are lowercase.
 func TestNormalizedKeys(t *testing.T) {
 	for _, name := range []string{"silence-44-s.mp3", "has-tags.m4a", "silence-44-s.flac"} {
 		t.Run(name, func(t *testing.T) {
@@ -258,8 +253,7 @@ func TestNormalizedKeys(t *testing.T) {
 	}
 }
 
-// TestExtensions covers the extension lists, which are the hint a caller uses
-// when walking a directory.
+// TestExtensions checks the extension lists for directory scans.
 func TestExtensions(t *testing.T) {
 	tests := []struct {
 		format tag.Format
@@ -311,8 +305,7 @@ func TestLooksLike(t *testing.T) {
 	}
 }
 
-// TestFormats covers the list of supported containers, which a caller may report
-// to a user.
+// TestFormats checks the list of supported containers.
 func TestFormats(t *testing.T) {
 	got := Formats()
 	want := []tag.Format{tag.MP3, tag.M4A, tag.FLAC}
@@ -325,15 +318,14 @@ func TestFormats(t *testing.T) {
 		}
 	}
 
-	// The result is a copy, so a caller cannot change what this package supports.
+	// The result is a copy. Callers cannot change supported formats.
 	got[0] = tag.Format("wav")
 	if Formats()[0] != tag.MP3 {
 		t.Error("Formats() returned its own list, want a copy")
 	}
 }
 
-// TestID3Helpers covers reaching the ID3 tag of an MP3 file on its own, which is
-// what a caller rewriting tags needs.
+// TestID3Helpers checks direct access to the ID3 tag of an MP3 file.
 func TestID3Helpers(t *testing.T) {
 	f, err := os.Open(dataDir + "silence-44-s.mp3")
 	if err != nil {
@@ -352,8 +344,8 @@ func TestID3Helpers(t *testing.T) {
 		t.Errorf("TIT2 = %q, want %q", got, want)
 	}
 
-	// This file also carries an ID3v1 tag at its end, which is read separately
-	// from the ID3v2 tag that precedes the audio.
+	// This file also has an ID3v1 tag at its end. It is read separately from the
+	// ID3v2 tag at the start.
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		t.Fatal(err)
 	}
@@ -367,14 +359,13 @@ func TestID3Helpers(t *testing.T) {
 	if got, want := v1.Track, 2; got != want {
 		t.Errorf("ID3v1 track = %d, want %d", got, want)
 	}
-	// This file's genre byte is the "unset" value, so no genre comes back even
-	// though the ID3v2 tag has one.
+	// The genre byte in this file is the unset value. No genre is returned. The ID3v2
+	// tag has a genre.
 	if got := v1.Genre; got != "" {
 		t.Errorf("ID3v1 genre = %q, want empty for an unset genre byte", got)
 	}
 
-	// A file that has no ID3v1 tag at all reports that, which is a normal answer
-	// rather than a failure of the file.
+	// A file without an ID3v1 tag returns an error. This is expected.
 	if _, err := os.Open(dataDir + "silence-44-s.flac"); err != nil {
 		t.Fatal(err)
 	}
@@ -388,8 +379,7 @@ func TestID3Helpers(t *testing.T) {
 	}
 }
 
-// TestMissingFile covers a path that is not there, which is a different failure
-// from a file that is not audio.
+// TestMissingFile checks a missing path. It differs from non-audio data.
 func TestMissingFile(t *testing.T) {
 	if _, err := Open(filepath.Join(t.TempDir(), "absent.mp3")); err == nil {
 		t.Error("Open(absent) = nil error, want a failure")

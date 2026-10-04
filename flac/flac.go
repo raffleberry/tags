@@ -1,10 +1,9 @@
-// Package flac reads FLAC files: the metadata blocks that follow the "fLaC"
-// marker, the Vorbis comments that hold the tags, and the pictures.
+// Package flac reads FLAC metadata blocks, Vorbis comments, and pictures.
 //
-// A FLAC file opens with the marker "fLaC" and then a run of metadata blocks,
-// each with a one byte header holding a type and a last-block flag. The audio
-// follows them. [Read] walks the blocks and reads what it understands, which is
-// the stream information, the comments and the pictures.
+// A FLAC file starts with the marker "fLaC" followed by metadata blocks.
+// Each block has a one byte header with a type and a last-block flag.
+// Audio data follows the blocks. [Read] reads the stream information,
+// comment, and picture blocks.
 package flac
 
 import (
@@ -19,22 +18,20 @@ import (
 	"github.com/raffleberry/tags/tag"
 )
 
-// Errors reported while reading a FLAC file.
+// Errors returned when reading a FLAC file.
 var (
 	// ErrNoMagic means the file does not start with the "fLaC" marker.
 	ErrNoMagic = errors.New("flac: not a FLAC file")
-	// ErrNoStreamInfo means the file has no stream information block, which the
-	// specification requires to be first.
+	// ErrNoStreamInfo means the file has no stream information block. The specification requires it first.
 	ErrNoStreamInfo = errors.New("flac: no stream information block")
-	// ErrBlock means a metadata block header is out of range.
+	// ErrBlock means a metadata block is malformed.
 	ErrBlock = errors.New("flac: malformed metadata block")
 )
 
-// Magic begins every FLAC file.
+// Magic is the marker at the start of every FLAC file.
 var Magic = []byte("fLaC")
 
-// The metadata block types, which are what the first byte of a block header
-// holds below its last-block flag.
+// Metadata block types. The low 7 bits of the block header hold the type.
 const (
 	BlockStreamInfo  = 0
 	BlockPadding     = 1
@@ -45,61 +42,57 @@ const (
 	BlockPicture     = 6
 )
 
-// headerLen is the size of a metadata block header: one byte of type and flag,
-// then a 24 bit length.
+// headerLen is the metadata block header size in bytes.
 const headerLen = 4
 
 // maxBlockLen is the largest length a 24 bit field can hold.
 const maxBlockLen = 1<<24 - 1
 
-// File is a FLAC file: its stream properties, its tags and its artwork.
+// File holds FLAC stream properties, tags, and artwork.
 type File struct {
 	audio    tag.Audio
 	tags     tag.Tag
 	pictures []tag.Picture
 	vendor   string
-	// seektable and blocks are the raw metadata blocks, kept so that a caller
-	// can reach the parts this package does not model.
+	// seektable and cuesheet hold decoded blocks. blocks holds all raw blocks.
 	seektable *SeekTable
+	cuesheet  *CueSheet
 	blocks    []Block
 }
 
-// Format reports that a FLAC file was read from.
+// Format returns the file format.
 func (f *File) Format() tag.Format { return tag.FLAC }
 
-// Tags returns the normalized metadata fields. The result must not be
-// modified.
+// Tags returns the normalized metadata fields. The result must not be modified.
 func (f *File) Tags() tag.Tag { return f.tags }
 
 // Audio returns the properties of the audio stream.
 func (f *File) Audio() tag.Audio { return f.audio }
 
-// Pictures returns the embedded artwork, one entry per picture block.
+// Pictures returns the embedded artwork. There is one entry per picture block.
 func (f *File) Pictures() []tag.Picture { return f.pictures }
 
-// Vendor returns the string the writer of the file put in the Vorbis comment,
-// naming the program that wrote it. It is empty when there are no comments.
+// Vendor returns the writer name from the Vorbis comment. It is empty when the file has no comment block.
 func (f *File) Vendor() string { return f.vendor }
 
-// SeekTable returns the seek points of the file, or nil when it has no seek
-// table block.
+// SeekTable returns the seek table. It returns nil when the file has none.
 func (f *File) SeekTable() *SeekTable { return f.seektable }
 
-// Blocks returns every metadata block in the file, in order, including the ones
-// this package does not decode.
+// CueSheet returns the cue sheet of the file. It returns nil when the file has none.
+func (f *File) CueSheet() *CueSheet { return f.cuesheet }
+
+// Blocks returns every metadata block in the file in order. It includes undecoded blocks.
 func (f *File) Blocks() []Block { return f.blocks }
 
-// Block is one metadata block, kept whole so that nothing is lost.
+// Block is one metadata block with its raw payload.
 type Block struct {
-	// Type is the block type, one of the Block constants.
+	// Type is the block type. It is one of the Block constants.
 	Type int
-	// Data is the payload of the block, which for a known type has already been
-	// decoded into the file.
+	// Data holds the block payload.
 	Data []byte
 }
 
-// Matches reports whether header, which should hold at least the first four
-// bytes of a file, looks like a FLAC file.
+// Matches reports whether header starts with the FLAC marker. It needs at least four bytes.
 func Matches(header []byte) bool {
 	return len(header) >= len(Magic) && string(header[:len(Magic)]) == string(Magic)
 }
@@ -114,7 +107,7 @@ func Open(path string) (*File, error) {
 	return Read(r)
 }
 
-// Read reads a FLAC file from r, which must be seekable.
+// Read reads a FLAC file from r. r must be seekable.
 func Read(r io.ReadSeeker) (*File, error) {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("flac: seeking: %w", err)
@@ -136,8 +129,7 @@ func Read(r io.ReadSeeker) (*File, error) {
 		return nil, fmt.Errorf("%w: the file has no audio", ErrNoStreamInfo)
 	}
 
-	// The bitrate follows from the length of the audio and the length of the
-	// stream, neither of which the file states directly.
+	// Bitrate is computed from audio size and duration. The file states neither directly.
 	if f.audio.Duration > 0 {
 		if size, err := audioSize(r, audioStart); err == nil && size > 0 {
 			f.audio.Bitrate = int(round(float64(size) * 8 / f.audio.Duration.Seconds()))
@@ -146,8 +138,7 @@ func Read(r io.ReadSeeker) (*File, error) {
 	return f, nil
 }
 
-// audioSize returns the number of bytes of audio in the file, which is the
-// distance from the start of the audio to the end of the file.
+// audioSize returns the byte count from audioStart to the end of the file.
 func audioSize(r io.ReadSeeker, audioStart int64) (int64, error) {
 	end, err := r.Seek(0, io.SeekEnd)
 	if err != nil {
@@ -160,8 +151,7 @@ func audioSize(r io.ReadSeeker, audioStart int64) (int64, error) {
 	return size, nil
 }
 
-// readBlocks walks the metadata blocks, filling in the file, and returns where
-// the audio starts.
+// readBlocks reads metadata blocks into f. It returns the audio start offset.
 func (f *File) readBlocks(r io.ReadSeeker) (audioStart int64, err error) {
 	for last := false; !last; {
 		last, err = f.readBlock(r)
@@ -177,8 +167,7 @@ func (f *File) readBlocks(r io.ReadSeeker) (audioStart int64, err error) {
 	return pos, nil
 }
 
-// readBlock reads one metadata block header and its payload, and reports whether
-// it was the last one.
+// readBlock reads one metadata block. It reports whether the block is last.
 func (f *File) readBlock(r io.ReadSeeker) (last bool, err error) {
 	header := make([]byte, headerLen)
 	if _, err := io.ReadFull(r, header); err != nil {
@@ -193,12 +182,9 @@ func (f *File) readBlock(r io.ReadSeeker) (last bool, err error) {
 		return false, fmt.Errorf("flac: seeking: %w", err)
 	}
 
-	// The comment and picture blocks are read by their own structure rather than
-	// by the length in the header. Some writers of the day wrote a length that
-	// does not match their content, and the reference implementation copes, so a
-	// file such a writer produced is still readable. Any other block is read at
-	// the length given, since its payload has no length of its own to fall back
-	// on.
+	// Comment and picture blocks are read by content, not by header length.
+	// Some writers store a wrong length. Other blocks use the header length.
+	// Other blocks have no inner length to use.
 	switch blockType {
 	case BlockVorbis:
 		comment, err := ReadVorbisComment(r)
@@ -206,8 +192,7 @@ func (f *File) readBlock(r io.ReadSeeker) (last bool, err error) {
 			return false, err
 		}
 		f.vendor = comment.Vendor
-		// A file with several comment blocks keeps the first, as the reference
-		// implementation does.
+		// Only the first comment block is kept.
 		if len(f.tags) == 0 {
 			f.tags = comment.Common()
 		}
@@ -235,13 +220,16 @@ func (f *File) readBlock(r io.ReadSeeker) (last bool, err error) {
 			if err == nil {
 				f.seektable = seektable
 			}
+		case BlockCueSheet:
+			if cuesheet, err := ParseCueSheet(data); err == nil && f.cuesheet == nil {
+				f.cuesheet = cuesheet
+			}
 		}
 		f.blocks = append(f.blocks, Block{Type: blockType, Data: data})
 		return last, nil
 	}
 
-	// The block that was just read by its own structure, kept whole for a caller
-	// who wants it.
+	// Store the raw bytes of the block just read.
 	end, err := r.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return false, fmt.Errorf("flac: seeking: %w", err)
@@ -260,34 +248,29 @@ func (f *File) readBlock(r io.ReadSeeker) (last bool, err error) {
 	return last, nil
 }
 
-// SeekPoint is one entry of a seek table: where in the stream a frame starts.
+// SeekPoint is one seek table entry. It gives the start of one frame.
 type SeekPoint struct {
-	// FirstSample is the sample number the frame starts at, or -1 for a
-	// placeholder point.
+	// FirstSample is the first sample number. Placeholder points use the maximum uint64 value.
 	FirstSample uint64
-	// ByteOffset is how far into the audio the frame starts.
+	// ByteOffset is the byte offset of the frame in the audio.
 	ByteOffset uint64
-	// NumSamples is how many samples the frame holds.
+	// NumSamples is the sample count of the frame.
 	NumSamples uint16
 }
 
-// SeekTable is the list of frames a file lets a player seek to. It is an
-// optimisation rather than a requirement, so most files have one.
+// SeekTable holds seek points from a seek table block.
 type SeekTable struct {
 	Points []SeekPoint
 }
 
-// placeholderPoint is the first sample number of a placeholder seek point, which
-// marks an entry reserved for a frame the writer did not need.
+// placeholderPoint is the FirstSample value of a reserved seek point.
 const placeholderPoint = 1<<64 - 1
 
-// ParseSeekTable decodes a seek table block. Each point is 18 bytes: a sample
-// number, an offset and a frame size.
+// ParseSeekTable decodes a seek table block. Each point is 18 bytes: a sample number, an offset, and a frame size.
 func ParseSeekTable(data []byte) (*SeekTable, error) {
 	const pointLen = 18
 
-	// A table whose size is not a whole number of points is malformed. Being
-	// strict here is what keeps a damaged block from being read as valid points.
+	// The data length must be a multiple of 18.
 	if len(data)%pointLen != 0 {
 		return nil, fmt.Errorf("%w: seek table of %d bytes", ErrBlock, len(data))
 	}
@@ -302,14 +285,12 @@ func ParseSeekTable(data []byte) (*SeekTable, error) {
 	return table, nil
 }
 
-// IsPlaceholder reports whether the point is a placeholder, which reserves a slot
-// without naming a frame.
+// IsPlaceholder reports whether the point is a placeholder.
 func (p SeekPoint) IsPlaceholder() bool { return p.FirstSample == placeholderPoint }
 
 // readStreamInfo fills in the stream properties from a stream information block.
 //
-// The block is defined as a series of bit fields that do not line up with the
-// bytes they occupy, so it is read as bits:
+// The block holds bit fields. They are read as bits:
 //
 //	 16 bits  the smallest block size in samples
 //	 16 bits  the largest block size in samples
@@ -329,15 +310,14 @@ func readStreamInfo(data []byte) (tag.Audio, error) {
 
 	minBlock := int(r.Read(16))
 	maxBlock := int(r.Read(16))
-	r.Skip(24 + 24) // the frame sizes, which are a hint for the encoder
+	r.Skip(24 + 24) // Skip frame sizes.
 
 	var audio tag.Audio
 	audio.SampleRate = int(r.Read(20))
 	audio.Channels = int(r.Read(3)) + 1
 	audio.BitsPerSample = int(r.Read(5)) + 1
 	samples := r.Read(36)
-	// What follows is the MD5 signature of the unencoded audio, which says
-	// nothing about the stream itself.
+	// The next field is the MD5 signature of the audio.
 
 	if audio.SampleRate == 0 {
 		return audio, fmt.Errorf("%w: the sample rate is zero", ErrBlock)
@@ -349,13 +329,11 @@ func readStreamInfo(data []byte) (tag.Audio, error) {
 	return audio, nil
 }
 
-// readPicture decodes a picture block from r, which is left at the end of the
-// block. ok is false when the block is malformed, in which case r is left
-// wherever the failure happened.
+// readPicture decodes a picture block from r. r is left at the end of the block.
+// ok is false when the block is malformed.
 //
-// A picture block is laid out like the ID3v2 attached picture frame: the type of
-// the picture, its MIME type and description as counted strings, four 32 bit
-// dimensions, and then the image itself as a counted string.
+// A picture block holds a picture type, MIME type, description, four 32 bit
+// dimensions, and image data. Strings and image data have 32 bit lengths.
 func readPicture(r io.Reader) (p tag.Picture, ok bool) {
 	var head [4]byte
 
@@ -408,8 +386,7 @@ func readPicture(r io.Reader) (p tag.Picture, ok bool) {
 	return p, true
 }
 
-// normalizePictureMIME fills in the MIME type of a picture from its magic
-// bytes, for the files whose writer left the type out.
+// normalizePictureMIME sets the MIME type from magic bytes when it is empty.
 func normalizePictureMIME(p *tag.Picture) {
 	if p.MIME != "" || len(p.Data) < 4 {
 		return
@@ -424,6 +401,5 @@ func normalizePictureMIME(p *tag.Picture) {
 	}
 }
 
-// round rounds a float to the nearest integer, which the sample count to seconds
-// conversion calls for.
+// round returns the nearest integer to f.
 func round(f float64) int64 { return int64(f + 0.5) }

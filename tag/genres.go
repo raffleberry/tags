@@ -2,13 +2,13 @@
 
 package tag
 
-// Genres is the ID3v1 genre list, which is still the numbering every format
-// falls back on: ID3v2 genre frames may hold a number in parentheses, the iTunes
-// "gnre" atom holds one, and ID3v1 has a single genre byte.
+// Genres is the ID3v1 genre list. Other formats use the same numbering.
+// ID3v2 genre frames can hold a number in parentheses. The iTunes "gnre"
+// atom holds a number. ID3v1 has a single genre byte.
 //
-// Index zero holds the first genre, so a one-based genre number N is
-// Genres[N-1]. The list is the 192 entries the original specification defines;
-// taggers written later use longer lists that this package does not model.
+// Index zero holds the first genre. Genre number N is Genres[N-1]. The list
+// has the 192 entries from the original specification. It excludes longer
+// lists from later taggers.
 var Genres = []string{
 	"Blues",
 	"Classic Rock",

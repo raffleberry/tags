@@ -84,20 +84,18 @@ func TestTags(t *testing.T) {
 		}
 	}
 
-	// Two ARTIST comments become two values of one key, which is why the tag is
-	// a map of slices.
+	// Two ARTIST comments give two values for one key.
 	if got, want := tags.Values(tag.Artist), []string{"piman", "jzig"}; len(got) != 2 {
 		t.Errorf("artists = %q, want %q", got, want)
 	}
 
-	// The writer names itself in the block.
+	// The block holds the writer name.
 	if got, want := f.Vendor(), "reference libFLAC 1.1.0 20030126"; got != want {
 		t.Errorf("Vendor() = %q, want %q", got, want)
 	}
 }
 
-// TestSplitTrackNumber covers a comment that holds the position and the total
-// together, as "02/10", which is split so that a caller can read either half.
+// TestSplitTrackNumber checks "02/10" values. The position and total are split.
 func TestSplitTrackNumber(t *testing.T) {
 	tags := open(t, "silence-44-s.flac").Tags()
 
@@ -109,16 +107,14 @@ func TestSplitTrackNumber(t *testing.T) {
 	}
 }
 
-// TestSeparateTrackTotal covers a file that gives the position and the total as
-// two comments of their own, which is the other way a tagger writes it.
+// TestSeparateTrackTotal checks separate position and total comments.
 func TestSeparateTrackTotal(t *testing.T) {
 	tags := open(t, "variable-block.flac").Tags()
 
 	if got, want := tags.Value(tag.Track), "01"; got != want {
 		t.Errorf("track = %q, want %q", got, want)
 	}
-	// This file states the total in both TOTALTRACKS and TRACKTOTAL, which are
-	// the same field under two names.
+	// TOTALTRACKS and TRACKTOTAL hold the same field.
 	if got, want := tags.Value(tag.TrackTotal), "11"; got != want {
 		t.Errorf("tracktotal = %q, want %q", got, want)
 	}
@@ -130,16 +126,15 @@ func TestSeparateTrackTotal(t *testing.T) {
 	}
 }
 
-// TestUnknownFieldsKeepTheirNames covers comments with no common meaning, which
-// are kept under a lowercased version of their own name so that nothing is lost.
+// TestUnknownFieldsKeepTheirNames checks unknown comments. They keep lowercased names.
 func TestUnknownFieldsKeepTheirNames(t *testing.T) {
 	tags := open(t, "variable-block.flac").Tags()
 
-	// A Japanese title, which also checks that a non ASCII value survives.
+	// Check that a non ASCII title survives.
 	if got, want := tags.Value("japanese title"), "アップルシード オリジナル・サウンドトラック"; got != want {
 		t.Errorf("japanese title = %q, want %q", got, want)
 	}
-	// A ripper tool, which has no common key.
+	// Check a ripper value with no common key.
 	if got := tags.Value("ripper"); got == "" {
 		t.Error("ripper is missing, want the name of the tool that made the file")
 	}
@@ -177,9 +172,7 @@ func TestMusicBrainzIDs(t *testing.T) {
 			t.Errorf("Tags()[%q] = %q, want %q", key, got, value)
 		}
 	}
-	// The names this file uses have no entry in the table, so they keep their own
-	// lowercased names. The values are what identify the release, so check that
-	// they are reachable.
+	// These names have no table entry. They keep lowercased names.
 	if got, want := tags.Value("musicbrainz_albumid"), want[tag.MusicBrainzReleaseID]; got != want {
 		t.Errorf("musicbrainz_albumid = %q, want %q", got, want)
 	}
@@ -215,8 +208,7 @@ func TestPictures(t *testing.T) {
 	}
 	p := pictures[0]
 
-	// A one pixel PNG, which FLAC describes in full where the other formats only
-	// record the image.
+	// The file holds a one pixel PNG with full description.
 	if got, want := p.MIME, "image/png"; got != want {
 		t.Errorf("MIME = %q, want %q", got, want)
 	}
@@ -247,7 +239,7 @@ func TestSeekTable(t *testing.T) {
 	if table == nil {
 		t.Fatal("SeekTable() = nil, want one")
 	}
-	// Six points, the last of which is a placeholder that names no frame.
+	// The table has six points. The last point is a placeholder.
 	if got, want := len(table.Points), 6; got != want {
 		t.Fatalf("len(Points) = %d, want %d", got, want)
 	}
@@ -261,8 +253,7 @@ func TestSeekTable(t *testing.T) {
 	}
 }
 
-// TestBlocks covers the metadata blocks as a whole, including the ones this
-// package does not decode.
+// TestBlocks checks all metadata blocks. It includes undecoded block types.
 func TestBlocks(t *testing.T) {
 	f := open(t, "silence-44-s.flac")
 
@@ -280,8 +271,7 @@ func TestBlocks(t *testing.T) {
 		}
 	}
 
-	// The file has an application block this package does not decode, which must
-	// still be present.
+	// The file has an application block. It must still be present.
 	app := open(t, "flac_application.flac")
 	found := false
 	for _, block := range app.Blocks() {
@@ -314,8 +304,7 @@ func TestMatches(t *testing.T) {
 	}
 }
 
-// readMarker returns the first bytes of a test file, which is what a sniffing
-// reader gets to look at.
+// readMarker returns the first bytes of a test file.
 func readMarker(t *testing.T, name string) []byte {
 	t.Helper()
 	f, err := os.Open(dataDir + name)
@@ -331,8 +320,7 @@ func readMarker(t *testing.T, name string) []byte {
 	return marker
 }
 
-// TestNotFLAC covers files that start with something else, and files too short to
-// hold a marker.
+// TestNotFLAC checks non FLAC files and short files.
 func TestNotFLAC(t *testing.T) {
 	for _, name := range []string{"has-tags.m4a", "silence-44-s.mp3"} {
 		if _, err := Open(dataDir + name); err == nil {
@@ -346,20 +334,17 @@ func TestNotFLAC(t *testing.T) {
 	}
 }
 
-// TestDamagedFiles covers files whose metadata blocks claim more bytes than the
-// file holds. Some are still readable, and those that are not must fail rather
-// than be read as something else.
+// TestDamagedFiles checks files with short data. Readable files pass. Unreadable files return errors.
 func TestDamagedFiles(t *testing.T) {
 	tests := []struct {
 		name    string
 		wantErr bool
 	}{
-		// A stream information block cut short leaves nothing to report.
+		// A short stream information block is unreadable.
 		{"106-invalid-streaminfo.flac", true},
-		// A picture block whose size field is wrong is still readable, since the
-		// picture says how long it is.
+		// A picture block with a wrong size is still readable. The picture states its own length.
 		{"106-short-picture-block-size.flac", false},
-		// Tags that were overwritten in place, leaving the padding short.
+		// Tags were overwritten in place. The padding is short.
 		{"52-overwritten-metadata.flac", false},
 		{"52-too-short-block-size.flac", false},
 		// A file that ends in the middle of a comment block.
@@ -385,7 +370,7 @@ func TestDamagedFiles(t *testing.T) {
 	}
 }
 
-// TestVorbisComment covers the comment format on its own, away from a file.
+// TestVorbisComment checks the comment format without a file.
 func TestVorbisComment(t *testing.T) {
 	comment, err := ParseVorbisComment(buildComment("tagger", "TITLE=A Title", "ARTIST=An Artist", "ALBUM=An Album"))
 	if err != nil {
@@ -398,8 +383,7 @@ func TestVorbisComment(t *testing.T) {
 	if got, want := len(comment.Fields), 3; got != want {
 		t.Fatalf("len(Fields) = %d, want %d", got, want)
 	}
-	// The fields keep the order they were written in, which a map of slices
-	// alone would lose.
+	// Fields keep file order.
 	if got, want := comment.Fields[0].Key, "TITLE"; got != want {
 		t.Errorf("Fields[0].Key = %q, want %q", got, want)
 	}
@@ -414,8 +398,7 @@ func TestVorbisComment(t *testing.T) {
 	}
 }
 
-// TestCommentWithoutEquals covers a comment with no equals sign, which names no
-// field and so is skipped as the specification says.
+// TestCommentWithoutEquals checks a line without "=". It is skipped.
 func TestCommentWithoutEquals(t *testing.T) {
 	comment, err := ParseVorbisComment(buildComment("tagger", "TITLE=A Title", "no equals sign here"))
 	if err != nil {
@@ -429,8 +412,7 @@ func TestCommentWithoutEquals(t *testing.T) {
 	}
 }
 
-// TestCommentWithRepeatedEquals covers a value that itself contains an equals
-// sign, which must be kept whole rather than split on every one.
+// TestCommentWithRepeatedEquals checks a value with "=". Only the first "=" splits.
 func TestCommentWithRepeatedEquals(t *testing.T) {
 	comment, err := ParseVorbisComment(buildComment("tagger", "comment=a=b=c"))
 	if err != nil {
@@ -441,11 +423,10 @@ func TestCommentWithRepeatedEquals(t *testing.T) {
 	}
 }
 
-// TestTruncatedComment covers a block whose count of fields is larger than the
-// fields it holds, which the fields already read survive.
+// TestTruncatedComment checks a block with a large count. Read fields are kept.
 func TestTruncatedComment(t *testing.T) {
 	data := buildComment("tagger", "TITLE=A Title")
-	// Raise the count from one to a hundred.
+	// Set the count to 100.
 	countAt := len(data) - 4 - len("TITLE=A Title") - 4
 	copy(data[countAt:countAt+4], []byte{100, 0, 0, 0})
 
@@ -458,7 +439,7 @@ func TestTruncatedComment(t *testing.T) {
 	}
 }
 
-// TestEmptyComment covers a block with a vendor string and no fields at all.
+// TestEmptyComment checks a block with no fields.
 func TestEmptyComment(t *testing.T) {
 	comment, err := ParseVorbisComment(buildComment("", ""))
 	if err != nil {
@@ -472,8 +453,7 @@ func TestEmptyComment(t *testing.T) {
 	}
 }
 
-// buildComment assembles a Vorbis comment block from a vendor string and fields,
-// which is what a tagger writes.
+// buildComment builds a Vorbis comment block from a vendor string and fields.
 func buildComment(vendor string, fields ...string) []byte {
 	buf := new(bytes.Buffer)
 	writeCounted(buf, vendor)
@@ -489,17 +469,15 @@ func buildComment(vendor string, fields ...string) []byte {
 	return buf.Bytes()
 }
 
-// writeCounted writes a length and then that many bytes, both little endian.
+// writeCounted writes a little endian length followed by bytes.
 func writeCounted(buf *bytes.Buffer, s string) {
 	buf.Write([]byte{byte(len(s)), byte(len(s) >> 8), byte(len(s) >> 16), byte(len(s) >> 24)})
 	buf.WriteString(s)
 }
 
-// TestReadStreamInfo covers the stream information block on its own, whose fields
-// do not line up with the bytes they occupy.
+// TestReadStreamInfo checks a stream information block alone. Its fields are bit fields.
 func TestReadStreamInfo(t *testing.T) {
-	// The stream information block of the test file, which is 4608 sample blocks
-	// of 44100 Hz stereo 16 bit audio.
+	// This is the test file block: 4608 blocks of 44100 Hz stereo 16 bit audio.
 	data, err := hexDecode(
 		"12001200" + "000279" + "00052b" + "0ac442f0" + "00027ac0" +
 			"6291dbd8dcb7dc480132e4c4ba154a17")
@@ -523,8 +501,7 @@ func TestReadStreamInfo(t *testing.T) {
 	assertClose(t, audio.Duration, 3.68472)
 }
 
-// TestInvalidStreamInfo covers a block that is too short, or whose fields do not
-// describe an audio stream.
+// TestInvalidStreamInfo checks short blocks and bad field values.
 func TestInvalidStreamInfo(t *testing.T) {
 	tests := []struct {
 		name string
@@ -532,9 +509,9 @@ func TestInvalidStreamInfo(t *testing.T) {
 	}{
 		{"empty", nil},
 		{"shorter than the block", make([]byte, 33)},
-		// A sample rate of zero, which no audio can have.
+		// Zero sample rate is invalid.
 		{"zero sample rate", streamInfoWith(sampleRateField, 0)},
-		// Block sizes that run backwards.
+		// Reversed block sizes are invalid.
 		{"block sizes reversed", streamInfoWith(minBlockField, 0xFFFF)},
 	}
 
@@ -547,7 +524,7 @@ func TestInvalidStreamInfo(t *testing.T) {
 	}
 }
 
-// Bit positions within a stream information block, for building test blocks.
+// Bit positions in a stream information block.
 const (
 	minBlockField    = 0
 	sampleRateField  = 80
@@ -555,10 +532,9 @@ const (
 	sampleRateBitLen = 20
 )
 
-// streamInfoWith returns a valid stream information block with one field set,
-// which is how the invalid cases above are built.
+// streamInfoWith returns a valid block with one field set.
 func streamInfoWith(field int, value int) []byte {
-	// Start from the test file's block and overwrite the field.
+	// Copy the test block and overwrite the field.
 	data, _ := hexDecode(
 		"12001200" + "000279" + "00052b" + "0ac442f0" + "00027ac0" +
 			"6291dbd8dcb7dc480132e4c4ba154a17")
@@ -575,14 +551,13 @@ func streamInfoWith(field int, value int) []byte {
 		bitPos++
 	}
 	if field == minBlockField {
-		// The minimum block size is the first field, which is separate.
+		// The minimum block size is the first field.
 		copy(data, []byte{byte(value >> 8), byte(value)})
 	}
 	return data
 }
 
-// hexDecode decodes a hex string, ignoring the spaces, which makes the byte
-// groupings above readable.
+// hexDecode decodes a hex string. It ignores spaces.
 func hexDecode(s string) ([]byte, error) {
 	var out []byte
 	var high byte
@@ -619,8 +594,7 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// TestPictureMIMEFromMagic covers a picture block whose MIME type is missing,
-// which the format allows and which the magic bytes can make up for.
+// TestPictureMIMEFromMagic checks a picture with no MIME type. Magic bytes supply it.
 func TestPictureMIMEFromMagic(t *testing.T) {
 	png := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
 	p := tag.Picture{Data: png}
@@ -636,7 +610,7 @@ func TestPictureMIMEFromMagic(t *testing.T) {
 		t.Errorf("MIME = %q, want %q", got, want)
 	}
 
-	// A type that is already set is left alone.
+	// A set MIME type is unchanged.
 	p = tag.Picture{MIME: "image/gif", Data: png}
 	normalizePictureMIME(&p)
 	if got, want := p.MIME, "image/gif"; got != want {
@@ -645,9 +619,7 @@ func TestPictureMIMEFromMagic(t *testing.T) {
 }
 
 func TestStringConversions(t *testing.T) {
-	// The helpers the tests above rely on must not be reachable as a path that
-	// leaves the reader somewhere wrong, so check that a comment read from a
-	// reader leaves it exactly after the block.
+	// TestStringConversions checks that reading a comment leaves the reader after the block.
 	buf := new(bytes.Buffer)
 	buf.Write(buildComment("tagger", "TITLE=A Title"))
 

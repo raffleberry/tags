@@ -2,6 +2,8 @@ package id3
 
 import (
 	"bytes"
+	"compress/zlib"
+	"io"
 	"strings"
 
 	"github.com/raffleberry/tags/tag"
@@ -31,28 +33,27 @@ const (
 
 // Frame is one decoded ID3v2 frame.
 //
-// Text frames fill [Frame.Text]. Binary frames, such as an attached picture or
-// a private frame, fill [Frame.Data] instead.
+// Text frames use [Frame.Text]. Binary frames use [Frame.Data]. Chapter frames
+// use [Frame.Chapter] and table of contents frames use [Frame.TOC]. Chapter and
+// table of contents frames also keep the raw payload in [Frame.Data].
 type Frame struct {
-	// Name is the frame ID, upper case: three characters for ID3v2.2, four for
-	// later versions.
+	// Name is the frame ID in upper case. ID3v2.2 uses three characters. Later versions use four.
 	Name string
-	// Lang is the three letter ISO-639-2 code of a COMM or USLT frame.
+	// Lang is the ISO-639-2 language code of a COMM or USLT frame.
 	Lang string
-	// Desc is the short description of a COMM, USLT, TXXX or WXXX frame. It is
-	// where iTunes keeps normalization data and ReplayGain values.
+	// Desc is the description of a COMM, USLT, TXXX, or WXXX frame.
 	Desc string
-	// Text holds the decoded values of a text frame, in file order. For a
-	// comment or a set of lyrics the description is kept in [Frame.Desc]
-	// instead of being the first value.
+	// Text holds decoded text values in file order. For COMM and USLT frames the description is in [Frame.Desc].
 	Text []string
 	// Data holds the raw payload of a binary frame.
 	Data []byte
+	// Chapter holds the decoded CHAP data. It is nil for other frames.
+	Chapter *Chapter
+	// TOC holds the decoded CTOC data. It is nil for other frames.
+	TOC *TableOfContents
 }
 
-// UserText is a decoded TXXX frame: free form text filed under a user defined
-// description, the conventional home of ReplayGain values and MusicBrainz
-// identifiers.
+// UserText is a decoded TXXX frame. It holds free-form text under a user-defined description.
 type UserText struct {
 	Desc string
 	Text []string
@@ -74,8 +75,7 @@ func (t *Tag) Value(name string) string {
 	return ""
 }
 
-// Values returns the decoded text of every frame with the given name, in file
-// order. Binary frames contribute nothing.
+// Values returns decoded text from each frame with the given name, in file order. Binary frames are skipped.
 func (t *Tag) Values(name string) []string {
 	var values []string
 	for _, f := range t.Frames {
@@ -96,13 +96,13 @@ func (t *Tag) Lookup(name string) (Frame, bool) {
 	return Frame{}, false
 }
 
-// Has reports whether the tag holds a frame with the given name.
+// Has reports whether the tag contains a frame with the given name.
 func (t *Tag) Has(name string) bool {
 	_, ok := t.Lookup(name)
 	return ok
 }
 
-// Pictures returns the artwork held in APIC and PIC frames.
+// Pictures returns artwork from APIC and PIC frames.
 func (t *Tag) Pictures() []tag.Picture {
 	var out []tag.Picture
 	for _, f := range t.Frames {
@@ -135,8 +135,7 @@ func (t *Tag) UserURL() []UserURL {
 	return out
 }
 
-// UniqueFileID returns the identifier stored in a UFID frame owned by owner,
-// such as "http://musicbrainz.org".
+// UniqueFileID returns the identifier in a UFID frame with the given owner.
 func (t *Tag) UniqueFileID(owner string) ([]byte, bool) {
 	for _, f := range t.Frames {
 		if f.Name != FrameUniqueFile {
@@ -150,10 +149,7 @@ func (t *Tag) UniqueFileID(owner string) ([]byte, bool) {
 	return nil, false
 }
 
-// decodeFrame turns a raw frame payload into a [Frame]. ok is false when the
-// frame carries nothing this package can represent: a compressed, encrypted or
-// grouped frame, an empty one, or one whose payload does not fit the layout its
-// ID promises.
+// decodeFrame decodes a raw frame payload into a [Frame]. ok is false for encrypted, empty, or malformed frames.
 func (t *Tag) decodeFrame(name string, payload []byte, flags [2]byte) (Frame, bool) {
 	payload, ok := t.applyFrameFlags(name, payload, flags)
 	if !ok || len(payload) == 0 {
@@ -162,9 +158,14 @@ func (t *Tag) decodeFrame(name string, payload []byte, flags [2]byte) (Frame, bo
 
 	frame := Frame{Name: name}
 	switch {
+	case name == FrameChapter:
+		return t.decodeChapter(name, payload)
+
+	case name == FrameTOC:
+		return t.decodeTOC(name, payload)
+
 	case name == FramePicture || name == framePictureOld2:
-		// Kept raw: Pictures needs the frame name to tell the two layouts
-		// apart, and the result is a tag.Picture rather than text.
+		// Stored raw. The frame name identifies the layout during picture decoding.
 		frame.Data = payload
 
 	case name == FrameComment || name == frameComment2:
@@ -197,26 +198,26 @@ func (t *Tag) decodeFrame(name string, payload []byte, flags [2]byte) (Frame, bo
 		frame.Desc, frame.Text = desc, []string{url}
 
 	case strings.HasPrefix(name, "T"):
-		// Every remaining T frame is a plain text frame.
+		// Remaining T frames are text frames.
 		frame.Text = decodeText(encoding(payload[0]), payload)
 
 	case strings.HasPrefix(name, "W"):
-		// URL frames: a bare Latin-1 string.
+		// W frames hold a Latin-1 URL string.
 		frame.Text = []string{strings.TrimSpace(decodeLatin1(payload))}
 
 	default:
 		frame.Data = payload
 	}
 
-	if len(frame.Text) == 0 && len(frame.Data) == 0 {
+	if len(frame.Text) == 0 && len(frame.Data) == 0 && frame.Chapter == nil && frame.TOC == nil {
 		return Frame{}, false
 	}
 	return frame, true
 }
 
-// applyFrameFlags resolves the per frame flags of ID3v2.3 and ID3v2.4, which
-// decide whether a frame can be read at all and how its payload is encoded. ok
-// is false for a frame that must be skipped.
+// applyFrameFlags applies ID3v2.3 and ID3v2.4 frame flags to a payload. ok is false for skipped frames.
+//
+// Compressed frames are decompressed. Group identifiers are removed. Frame-level unsynchronisation is removed first.
 func (t *Tag) applyFrameFlags(name string, payload []byte, flags [2]byte) ([]byte, bool) {
 	var compressed, encrypted, grouped, unsynched, hasLengthIndicator bool
 	if t.Version.Minor >= 4 {
@@ -230,26 +231,75 @@ func (t *Tag) applyFrameFlags(name string, payload []byte, flags [2]byte) ([]byt
 		encrypted = flags[1]&0x40 != 0
 		grouped = flags[1]&0x20 != 0
 	}
-	if compressed || encrypted || grouped {
+	// Encrypted frames are skipped.
+	if encrypted {
 		return nil, false
 	}
 
 	if t.Version.Minor >= 4 && unsynched {
 		payload = deunsynchronise(payload)
 	}
+
+	// Extra header bytes precede the data: group identifier, then length indicator in v2.4 or decompressed size in v2.3.
+	if grouped {
+		if len(payload) < 1 {
+			return nil, false
+		}
+		payload = payload[1:]
+	}
+
+	if t.Version.Minor == 3 && compressed {
+		if len(payload) < 4 {
+			return nil, false
+		}
+		payload = payload[4:]
+		return inflate(payload)
+	}
+
+	if t.Version.Minor >= 4 && compressed {
+		if len(payload) < 4 {
+			return nil, false
+		}
+		// The indicator holds the decompressed size. Both synchsafe and plain integers are accepted.
+		payload = payload[4:]
+		return inflate(payload)
+	}
+
 	if hasLengthIndicator && len(payload) >= 4 {
-		// The indicator repeats the frame size as a synchsafe integer. Some
-		// taggers set the flag without writing one, so only step over a value
-		// that actually agrees with the payload.
+		// The indicator repeats the frame size. It is skipped only when it matches the payload length.
 		if n, ok := unsynchsafe(payload); ok && n == len(payload)-4 {
+			payload = payload[4:]
+		} else if n := int(payload[0])<<24 | int(payload[1])<<16 | int(payload[2])<<8 | int(payload[3]); n == len(payload)-4 {
 			payload = payload[4:]
 		}
 	}
 	return payload, true
 }
 
-// decodeTextWithDesc splits a payload that begins with an encoding byte, skips
-// a terminated description and decodes the values that follow.
+// maxInflated is the maximum decompressed size of a compressed frame in bytes.
+const maxInflated = 8 << 20
+
+// inflate decompresses zlib data. ok is false for invalid or oversized output.
+func inflate(data []byte) ([]byte, bool) {
+	r, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, false
+	}
+	defer r.Close()
+	out, err := io.ReadAll(io.LimitReader(r, maxInflated+1))
+	if err != nil {
+		return nil, false
+	}
+	if len(out) > maxInflated {
+		return nil, false
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
+
+// decodeTextWithDesc decodes a payload with an encoding byte, a terminated description, and text values.
 func decodeTextWithDesc(payload []byte) (desc string, text []string, ok bool) {
 	enc := encoding(payload[0])
 	desc, rest := cutTerminated(enc, payload[1:])
@@ -257,8 +307,7 @@ func decodeTextWithDesc(payload []byte) (desc string, text []string, ok bool) {
 	return desc, text, len(text) > 0
 }
 
-// decodeLangText splits a payload laid out as encoding, a three character
-// language code, a terminated description and then the values.
+// decodeLangText decodes a payload with an encoding byte, a language code, a terminated description, and text values.
 func decodeLangText(payload []byte) (lang, desc string, text []string, ok bool) {
 	if len(payload) < 4 {
 		return "", "", nil, false
@@ -270,8 +319,7 @@ func decodeLangText(payload []byte) (lang, desc string, text []string, ok bool) 
 	return lang, desc, text, len(text) > 0
 }
 
-// decodePicture decodes an APIC frame, or an ID3v2.2 PIC frame which stores a
-// three letter image format where APIC stores a MIME type.
+// decodePicture decodes an APIC frame or an ID3v2.2 PIC frame. PIC stores a three-letter format. APIC stores a MIME type.
 func decodePicture(f Frame) (tag.Picture, bool) {
 	if len(f.Data) < 2 {
 		return tag.Picture{}, false
@@ -305,8 +353,7 @@ func decodePicture(f Frame) (tag.Picture, bool) {
 	return p, true
 }
 
-// mimeFromImage guesses a MIME type from the magic bytes of an image, for
-// taggers that left the type out.
+// mimeFromImage returns a MIME type based on image header bytes.
 func mimeFromImage(data []byte) string {
 	switch {
 	case bytes.HasPrefix(data, []byte{0xFF, 0xD8, 0xFF}):
@@ -322,8 +369,7 @@ func mimeFromImage(data []byte) string {
 	}
 }
 
-// cutTerminated returns the first terminated string in data and the bytes after
-// it. A string with no terminator runs to the end of the payload.
+// cutTerminated returns the first terminated string in data and the remaining bytes. A string without a terminator extends to the end.
 func cutTerminated(enc encoding, data []byte) (string, []byte) {
 	head, rest, _ := cutAtTerminator(enc, data)
 	return decodeString(enc, head), rest

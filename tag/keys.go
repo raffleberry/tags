@@ -2,10 +2,9 @@ package tag
 
 import "strings"
 
-// The normalized field names used across every supported container. Keys are
-// lowercase; a Tag produced by this module never uses uppercase keys, so
-// callers may normalize a key of their own with strings.ToLower before looking
-// it up.
+// The normalized field names for all supported containers. Keys are
+// lowercase. Tags from this module use lowercase keys only. Lowercase custom
+// keys with strings.ToLower before lookup.
 const (
 	// Descriptive fields.
 	Title       = "title"
@@ -77,9 +76,9 @@ const (
 	MusicBrainzAlbumArtistID = "musicbrainz_albumartistid"
 )
 
-// SplitTotal splits a positional tag value such as "3/11" into its position and
-// its total. A value without a total returns an empty total, and an empty input
-// returns two empty strings. Surrounding space is trimmed from both halves.
+// SplitTotal splits a positional value such as "3/11" into position and total.
+// A value without a total returns an empty total. Empty input returns two
+// empty strings. Surrounding space is trimmed.
 func SplitTotal(value string) (position, total string) {
 	before, after, found := strings.Cut(value, "/")
 	if !found {
@@ -88,8 +87,8 @@ func SplitTotal(value string) (position, total string) {
 	return strings.TrimSpace(before), strings.TrimSpace(after)
 }
 
-// JoinTotal renders a position and total as "3/11", or just the position when
-// the total is empty.
+// JoinTotal formats a position and total as "3/11". An empty total returns
+// the position alone.
 func JoinTotal(position, total string) string {
 	if total == "" {
 		return position

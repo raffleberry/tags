@@ -7,12 +7,7 @@ import (
 	"github.com/raffleberry/tags/tag"
 )
 
-// Genre returns the name of the genre with the given number. The numbering is
-// the one ID3 itself uses, where zero is the first entry, so both the genre byte
-// of an ID3v1 tag and a number inside a TCON frame index the list directly.
-//
-// The second result is false for a number outside the list. Note that this is
-// not the numbering iTunes uses in its "gnre" atom, which counts from one.
+// Genre returns the genre name for number n. Numbering starts at zero. The second result is false for numbers outside the list.
 func Genre(n int) (string, bool) {
 	if n < 0 || n >= len(tag.Genres) {
 		return "", false
@@ -20,12 +15,7 @@ func Genre(n int) (string, bool) {
 	return tag.Genres[n], true
 }
 
-// ParseGenres resolves the genre syntax ID3v2 allows into plain names. A TCON
-// frame holds either a bare number, a bare name, or one or more numbers in
-// parentheses followed by an optional clarifying name, as in "(17)", "(17)Britpop"
-// or "(17)(20)". The tokens "(RX)" and "(CR)" mean "Remix" and "Cover".
-//
-// A value that resolves to nothing is skipped, so the result may be empty.
+// ParseGenres resolves ID3v2 genre syntax into names. A TCON value holds a number, a name, or parenthesized numbers with an optional name. "(RX)" means "Remix". "(CR)" means "Cover". Values without a match are skipped.
 func ParseGenres(values []string) []string {
 	var genres []string
 	for _, value := range values {
@@ -36,10 +26,9 @@ func ParseGenres(values []string) []string {
 	return genres
 }
 
-// parseGenre resolves one TCON value, which may hold several genres.
+// parseGenre resolves one TCON value into genre names.
 func parseGenre(value string) []string {
-	// The number a tagger of the nineties wrote is the genre byte of an ID3v1
-	// tag, so it indexes the list from zero.
+	// A bare number indexes the genre list from zero.
 	if name, ok := Genre(numberOf(value)); ok {
 		return []string{name}
 	}
@@ -58,16 +47,14 @@ func parseGenre(value string) []string {
 		}
 		value = strings.TrimLeft(value[end+1:], " ")
 	}
-	// A name the tagger spelled out wins over the numbers it came with, unless
-	// it merely repeats one of them.
+	// A trailing name is added unless it repeats a listed genre.
 	if value != "" && !slices.Contains(genres, value) {
 		genres = append(genres, value)
 	}
 	return genres
 }
 
-// genreToken resolves the inside of one "(...)" group, or a bare value that is
-// entirely a genre number.
+// genreToken resolves one parenthesized group or a bare genre number.
 func genreToken(token string) (string, bool) {
 	switch token {
 	case "RX":
@@ -79,8 +66,7 @@ func genreToken(token string) (string, bool) {
 	}
 }
 
-// numberOf returns the value of a string of digits, or -1 when the string holds
-// something else.
+// numberOf returns the value of digit string s. It returns -1 for other input.
 func numberOf(s string) int {
 	if s == "" {
 		return -1

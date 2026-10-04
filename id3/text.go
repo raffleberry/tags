@@ -7,7 +7,7 @@ import (
 	"unicode/utf16"
 )
 
-// encoding is the ID3v2 text encoding byte that begins every text frame.
+// encoding is the ID3v2 text encoding byte at the start of each text frame.
 type encoding byte
 
 const (
@@ -17,13 +17,10 @@ const (
 	encUTF8    encoding = 3 // UTF-8, one byte terminator
 )
 
-// decodeText splits a text frame payload into its values and decodes each one.
+// decodeText splits a text frame payload into values and decodes each value.
 // The encoding byte is skipped.
 //
-// Padding after the last value is not trimmed here: for a two byte encoding a
-// trailing zero byte is half of a character, and dropping it would cut the last
-// character in half. The empty values that padding produces are dropped below
-// instead, once the whole payload has been decoded.
+// Trailing padding is decoded first. Empty values from padding are removed after decoding.
 func decodeText(enc encoding, data []byte) []string {
 	data = dropEncoding(enc, data)
 
@@ -44,7 +41,7 @@ func decodeText(enc encoding, data []byte) []string {
 	return values
 }
 
-// decodeString decodes one text frame value.
+// decodeString decodes one text value.
 func decodeString(enc encoding, data []byte) string {
 	switch enc {
 	case encLatin1:
@@ -58,8 +55,7 @@ func decodeString(enc encoding, data []byte) string {
 	}
 }
 
-// dropEncoding removes the leading encoding byte when one is present. Some
-// taggers omit it in frames that only ever hold ASCII.
+// dropEncoding removes the leading encoding byte when present. Some frames omit it.
 func dropEncoding(enc encoding, data []byte) []byte {
 	if len(data) == 0 {
 		return data
@@ -67,14 +63,11 @@ func dropEncoding(enc encoding, data []byte) []byte {
 	if b := encoding(data[0]); b <= encUTF8 {
 		return data[1:]
 	}
-	// No encoding byte: the payload must already be in the frame's encoding.
-	// ASCII text is byte identical in all four, so carry on.
+	// Without an encoding byte the payload uses the frame encoding.
 	return data
 }
 
-// cutAtTerminator splits data at its first terminator, reporting whether one was
-// found. Terminators are searched on the encoding's alignment, so the 0x00 that
-// is half of a UTF-16 code unit is not mistaken for the end of a value.
+// cutAtTerminator splits data at its first terminator. It reports whether a terminator was found. Terminators match the encoding alignment.
 func cutAtTerminator(enc encoding, data []byte) (head, rest []byte, found bool) {
 	if enc == encLatin1 || enc == encUTF8 {
 		if i := bytes.IndexByte(data, 0); i >= 0 {
@@ -87,11 +80,11 @@ func cutAtTerminator(enc encoding, data []byte) (head, rest []byte, found bool) 
 			return data[:i], data[i+2:], true
 		}
 	}
-	// An odd trailing byte is not a valid code unit; keep it.
+	// An odd trailing byte is kept.
 	return data, nil, false
 }
 
-// trimNuls removes zero bytes from the end of data.
+// trimNuls removes trailing zero bytes.
 func trimNuls(data []byte) []byte {
 	end := len(data)
 	for end > 0 && data[end-1] == 0 {
@@ -100,8 +93,7 @@ func trimNuls(data []byte) []byte {
 	return data[:end]
 }
 
-// decodeLatin1 maps each byte to the code point of the same value, which is
-// how ISO-8859-1 maps onto Unicode.
+// decodeLatin1 decodes ISO-8859-1 data. Each byte maps to the same code point.
 func decodeLatin1(data []byte) string {
 	var b strings.Builder
 	b.Grow(len(data))
@@ -111,14 +103,12 @@ func decodeLatin1(data []byte) string {
 	return b.String()
 }
 
-// decodeUTF8 replaces invalid sequences rather than failing, because taggers
-// label Latin-1 payloads as UTF-8 fairly often.
+// decodeUTF8 decodes UTF-8 data. Invalid sequences become the replacement character.
 func decodeUTF8(data []byte) string {
 	return strings.ToValidUTF8(string(data), "\uFFFD")
 }
 
-// decodeUTF16 decodes big or little endian UTF-16, dropping a trailing odd
-// byte and any unpaired surrogate.
+// decodeUTF16 decodes UTF-16 data. A trailing odd byte is dropped.
 func decodeUTF16(data []byte, bigEndian bool) string {
 	n := len(data) / 2
 	if n == 0 {
@@ -135,9 +125,7 @@ func decodeUTF16(data []byte, bigEndian bool) string {
 	return string(utf16.Decode(units))
 }
 
-// decodeUTF16BOM decodes UTF-16 whose first two bytes are a byte order mark. A
-// missing or nonsensical mark falls back to big endian, which is what the
-// specification calls the default.
+// decodeUTF16BOM decodes UTF-16 with a byte order mark. Missing or invalid marks use big endian.
 func decodeUTF16BOM(data []byte) string {
 	switch {
 	case len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE:

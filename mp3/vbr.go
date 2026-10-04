@@ -12,38 +12,36 @@ import (
 	"github.com/raffleberry/tags/tag"
 )
 
-// Kind names the flavour of a variable bitrate header.
+// Kind identifies the type of variable bitrate header.
 type Kind string
 
-// The variable bitrate headers in the wild. "Info" is the CBR variant of
-// "Xing", written by the same encoders.
+// KindXing, KindInfo and KindVBRI are the variable bitrate header kinds.
+// Info is the CBR variant of Xing.
 const (
 	KindXing Kind = "Xing"
 	KindInfo Kind = "Info"
 	KindVBRI Kind = "VBRI"
 )
 
-// VBRHeader is the Xing, Info or VBRI header that a variable bitrate encoder
-// writes inside the first audio frame. It describes the whole stream, which is
-// why it is worth more than the frame header it sits in.
+// VBRHeader is the Xing, Info or VBRI header in the first audio frame. It
+// describes the whole stream. It holds more data than the frame header.
 type VBRHeader struct {
-	// Kind is which of the headers this is.
+	// Kind is the header type.
 	Kind Kind
-	// Frames is how many audio frames the stream holds, or -1 when the header
-	// omits it.
+	// Frames is the audio frame count, or -1 when the header omits it.
 	Frames int64
-	// Bytes is how many bytes of audio the stream holds, or -1 when the header
-	// omits it. The count includes the frame the header itself sits in.
+	// Bytes is the audio byte count, or -1 when the header omits it. The count
+	// includes the frame that holds the header.
 	Bytes int64
-	// Scale is the 0 to 100 quality index the encoder wrote, or -1 when the
-	// header omits it. Higher is better.
+	// Scale is the 0 to 100 quality index, or -1 when the header omits it.
+	// Higher values mean higher quality.
 	Scale int
-	// LAME describes the encoder, or is nil when the stream was not LAME.
+	// LAME describes the encoder. It is nil for non-LAME streams.
 	LAME *LAMEHeader
 }
 
-// bitrateMode works out whether the stream is CBR, VBR or ABR from the header,
-// falling back to what the header itself implies when LAME says nothing.
+// bitrateMode returns CBR, VBR or ABR from the header. It uses the header
+// kind when LAME data is absent.
 func (h *VBRHeader) bitrateMode() tag.BitrateMode {
 	if h.LAME != nil {
 		switch h.LAME.Method {
@@ -55,8 +53,8 @@ func (h *VBRHeader) bitrateMode() tag.BitrateMode {
 			return tag.BitrateVBR
 		}
 	}
-	// A VBRI header only ever exists in variable bitrate files, and an "Info"
-	// header only in constant bitrate ones.
+	// A VBRI header marks a variable bitrate file. An Info header marks a
+	// constant bitrate file.
 	switch h.Kind {
 	case KindVBRI:
 		return tag.BitrateVBR
@@ -69,7 +67,7 @@ func (h *VBRHeader) bitrateMode() tag.BitrateMode {
 	return tag.BitrateUnknown
 }
 
-// encoder names the tool that wrote the header.
+// encoder returns the name of the tool that wrote the header.
 func (h *VBRHeader) encoder() string {
 	switch {
 	case h.LAME != nil:
@@ -82,7 +80,9 @@ func (h *VBRHeader) encoder() string {
 	}
 }
 
-// Flags of a Xing header, which say which of the optional fields are present.
+// xingFrames, xingBytes, xingTOC and xingQuality are Xing header flags. They
+// list present optional fields. xingHeaderLen and vbriHeaderLen are header
+// sizes.
 const (
 	xingFrames    = 0x1
 	xingBytes     = 0x2
@@ -92,14 +92,14 @@ const (
 	vbriHeaderLen = 26
 )
 
-// vbrLookahead is how many bytes are read around a candidate variable bitrate
-// header. A Xing header with every field set, a LAME version string and the
-// LAME extended header together need under 150.
+// vbrLookahead is the byte count read around a candidate variable bitrate
+// header. A full Xing header with LAME version string and extended header
+// needs under 150 bytes.
 const vbrLookahead = 192
 
-// readVBRHeader returns the variable bitrate header inside the layer 3 frame at
-// offset, or nil when the frame has none. It never fails: a frame that looks
-// like it has a header but does not is simply treated as constant bitrate.
+// readVBRHeader returns the variable bitrate header in the layer 3 frame at
+// offset. It returns nil when the frame has none. It never returns an error.
+// A false header match is treated as constant bitrate.
 func readVBRHeader(r io.ReadSeeker, offset int64, h frameHeader) *VBRHeader {
 	for _, at := range []int64{xingOffset(h), 36} {
 		data, err := readAt(r, offset+at, vbrLookahead)
@@ -116,9 +116,9 @@ func readVBRHeader(r io.ReadSeeker, offset int64, h frameHeader) *VBRHeader {
 	return nil
 }
 
-// xingOffset returns where in a layer 3 frame the Xing header sits. The frame
-// holds a mix of its own side information and the channel data before it, and
-// how much depends on the version and the channel mode.
+// xingOffset returns the Xing header position in a layer 3 frame. The offset
+// depends on version and channel mode. It skips side information and channel
+// data before the header.
 func xingOffset(h frameHeader) int64 {
 	if h.version == MPEG1 {
 		if h.mode != Mono {
@@ -160,7 +160,7 @@ func parseXing(data []byte) *VBRHeader {
 		pos += 4
 	}
 	if flags&xingTOC != 0 {
-		// A seek table, of no interest when only reading.
+		// Seek table. It is not needed for reading.
 		pos += 100
 	}
 	if flags&xingQuality != 0 && need(4) {
@@ -179,7 +179,7 @@ func parseVBRI(data []byte) *VBRHeader {
 	if len(data) < vbriHeaderLen {
 		return nil
 	}
-	// Version, delay, quality: only the quality indicator is of interest.
+	// Bytes are at offset 10. Frames are at offset 14.
 	return &VBRHeader{
 		Kind:   KindVBRI,
 		Frames: int64(binary.BigEndian.Uint32(data[14:18])),
@@ -188,17 +188,17 @@ func parseVBRI(data []byte) *VBRHeader {
 	}
 }
 
-// parseLAMEVersion decodes the "LAME3.99.1" string a Xing header ends with. It
-// returns the version as written, the offset of the LAME extended header
-// relative to the start of data, and whether that header is there at all. ok is
-// false when data does not hold a LAME version string.
+// parseLAMEVersion decodes the LAME version string at the end of a Xing
+// header, such as "LAME3.99.1". It returns the version as written. It returns
+// the offset of the extended header relative to the start of data. ok is false
+// when data holds no LAME version string.
 //
-// Versions before 3.90 predate the extended header, and a 3.90 prerelease that
-// carries a long version string is treated as one of them too.
+// Versions before 3.90 lack the extended header. A 3.90 prerelease with a long
+// version string also lacks it.
 func parseLAMEVersion(data []byte) (version string, extAt int, ok bool) {
-	// The version string occupies a fixed 20 byte field, the first nine of which
-	// hold it and the last eleven of which are reserved. Reading past the field
-	// would take audio for flag characters.
+	// The version string uses a fixed 20 byte field. The first 9 bytes hold
+	// the string. The last 11 bytes are reserved. Reading past the field
+	// misreads audio as flags.
 	const fieldLen = 20
 	const tailLen = 11
 	if len(data) < fieldLen {
@@ -209,8 +209,8 @@ func parseLAMEVersion(data []byte) (version string, extAt int, ok bool) {
 		return "", 0, false
 	}
 
-	// The prefix is spelled in a couple of ways, so step over it by character
-	// class rather than by length.
+	// The prefix has multiple spellings. It is skipped by character class,
+	// not by length.
 	rest := bytes.TrimLeft(field, "EMAL")
 	major, rest := rest[:1], bytes.TrimLeft(rest[1:], ".")
 	minor := leadingDigits(rest)
@@ -218,9 +218,9 @@ func parseLAMEVersion(data []byte) (version string, extAt int, ok bool) {
 
 	majorNum, minorNum := atoi(string(major)), atoi(minor)
 
-	// Versions before 3.90 predate the extended header. A 3.90 prerelease that
-	// still carries a long version string is one of them too, and the open
-	// parenthes in the reserved field is how that shows up.
+	// Versions before 3.90 lack the extended header. A 3.90 prerelease with a
+	// long version string also lacks it. An open parenthesis in the reserved
+	// field marks this case.
 	if majorNum < 3 || (majorNum == 3 && minorNum < 90) ||
 		(majorNum == 3 && minorNum == 90 && rest[len(rest)-tailLen] == '(') {
 		flag := strings.TrimRight(string(bytes.Trim(rest, "\x00")), " \x00")
@@ -246,12 +246,12 @@ func parseLAMEVersion(data []byte) (version string, extAt int, ok bool) {
 	default:
 		suffix = " (?)"
 	}
-	// The extended header starts where the reserved field does, so its offset
-	// does not depend on how the version string was spelled.
+	// The extended header starts at the reserved field. Its offset does not
+	// depend on version string spelling.
 	return string(major) + "." + string(minor) + patch + suffix, fieldLen - tailLen, true
 }
 
-// leadingDigits returns the run of digits at the start of data.
+// leadingDigits returns digits at the start of data.
 func leadingDigits(data []byte) string {
 	i := 0
 	for ; i < len(data) && data[i] >= '0' && data[i] <= '9'; i++ {
@@ -259,7 +259,7 @@ func leadingDigits(data []byte) string {
 	return string(data[:i])
 }
 
-// atoi parses a string of digits, returning -1 when it is not one.
+// atoi parses a digit string. It returns -1 for other input.
 func atoi(s string) int {
 	if n, err := strconv.Atoi(s); err == nil {
 		return n
@@ -267,54 +267,52 @@ func atoi(s string) int {
 	return -1
 }
 
-// lameLen is the size of the LAME extended header, which describes how the
-// encoder produced the stream. See http://gabriel.mp3-tech.org/mp3infotag.html.
+// lameLen is the size of the LAME extended header. The header describes
+// encoder settings. See http://gabriel.mp3-tech.org/mp3infotag.html.
 const lameLen = 27
 
 // LAMEHeader is the extended header LAME appends to a Xing header.
 type LAMEHeader struct {
 	// Version is the encoder version string, such as "3.99.1+".
 	Version string
-	// Method says how LAME chose the bitrate: 1 for CBR, 2 for ABR, 3 to 6 for
-	// the flavours of VBR, and 0 when it does not say.
+	// Method is the bitrate selection method. 1 is CBR. 2 is ABR. 3 to 6 are
+	// VBR modes. 0 means unspecified.
 	Method int
-	// Bitrate is the target bitrate in kbit/s for CBR and ABR, and the lowest
-	// bitrate used for VBR.
+	// Bitrate is the target bitrate in kbit/s for CBR and ABR. For VBR it is
+	// the lowest bitrate used.
 	Bitrate int
-	// Preset is the LAME preset, or 0 when the encoder was given none.
+	// Preset is the LAME preset, or 0 when no preset was used.
 	Preset int
-	// Quality is the -V quality, 0 to 9, derived from the 0 to 100 index in the
-	// Xing header. This is the setting that matters most for a VBR file.
+	// Quality is the -V quality, 0 to 9. It is derived from the 0 to 100 index
+	// in the Xing header.
 	Quality int
-	// FineQuality is the second digit of that index, which LAME's own preset
-	// guesses need.
+	// FineQuality is the second digit of that index. It identifies presets.
 	FineQuality int
-	// LowPass is the low pass filter frequency in Hz, 0 when unknown.
+	// LowPass is the lowpass filter frequency in Hz, 0 when unknown.
 	LowPass int
-	// EncodingFlags is the raw flag byte, which LAME 3.90 to 3.92 used to mark
+	// EncodingFlags is the raw flag byte. LAME 3.90 to 3.92 used it to mark
 	// an average bitrate preset.
 	EncodingFlags int
-	// ATHType is the amplitude thresholding type the encoder chose.
+	// ATHType is the ATH type the encoder used.
 	ATHType int
-	// TrackPeak is the highest sample amplitude of the stream, 1.0 being the
+	// TrackPeak is the peak sample amplitude of the stream. 1.0 is the
 	// maximum.
 	TrackPeak float64
-	// TrackGain and AlbumGain are the ReplayGain adjustments in dB, nil when
-	// the encoder did not write them.
+	// TrackGain and AlbumGain are ReplayGain adjustments in dB. They are nil
+	// when the encoder did not write them.
 	TrackGain *float64
 	AlbumGain *float64
-	// Delay and Padding are the samples LAME added at the start and end of the
-	// stream to align it with the encoding delay, which are not part of the
-	// audio.
+	// Delay and Padding are samples LAME added at the start and end of the
+	// stream. They are not part of the audio.
 	Delay   int
 	Padding int
 }
 
 // parseLAME decodes the extended header at the start of data. version is the
-// version string that preceded it and scale the 0 to 100 quality index from the
-// Xing header, which is the same setting written in a different form.
+// prior version string. scale is the 0 to 100 quality index from the Xing
+// header. It is the same setting in a different form.
 //
-// nil is returned when data is too short to hold a header.
+// parseLAME returns nil when data is too short to hold a header.
 func parseLAME(data []byte, version string, scale int) *LAMEHeader {
 	if len(data) < lameLen {
 		return nil
@@ -329,14 +327,14 @@ func parseLAME(data []byte, version string, scale int) *LAMEHeader {
 		Method:  int(r.Read(4)),
 		LowPass: int(r.Read(8)) * 100,
 	}
-	// The Xing index counts the other way round: 100 is the best encoding,
-	// which is what -V 0 means.
+	// The Xing index is inverted relative to -V values. Index 100 maps to
+	// -V 0.
 	if scale >= 0 {
 		l.Quality = (100 - scale) / 10
 		l.FineQuality = (100 - scale) % 10
 	}
 
-	// The peak amplitude is a plain 32 bit fraction rather than a packed field.
+	// The peak amplitude is a 32 bit fraction, not a packed field.
 	if peak := binary.BigEndian.Uint32(data[r.Pos()/8:]); peak != 0 {
 		l.TrackPeak = float64(peak) / (1 << 23)
 	}
@@ -350,22 +348,23 @@ func parseLAME(data []byte, version string, scale int) *LAMEHeader {
 	l.Delay = int(r.Read(12))
 	l.Padding = int(r.Read(12))
 
-	// Source sample rate, unwise settings flag, stereo mode, noise shaping.
+	// Skip source sample rate, settings flag, stereo mode and noise shaping.
 	r.Skip(2 + 1 + 3 + 2)
-	r.Skip(1 + 7) // MP3 gain
-	r.Skip(2 + 3) // reserved and surround info
+	// Skip MP3 gain.
+	r.Skip(1 + 7)
+	// Skip reserved data and surround info.
+	r.Skip(2 + 3)
 	l.Preset = int(r.Read(11))
 	return l
 }
 
-// gain reads one of the ReplayGain fields: a three bit type, a three bit
-// origin, a sign and a nine bit adjustment in tenths of a decibel. want is the
-// type that marks the field as meaningful for this gain, 1 for the track gain
-// and 2 for the album gain; the other type only holds a value for the other
-// gain, so it is discarded.
+// gain reads one ReplayGain field. The field holds a three bit type, a three
+// bit origin, a sign bit and a nine bit adjustment in tenths of a decibel.
+// want marks the field as valid for this gain. 1 is track gain. 2 is album
+// gain. Other types return nil.
 func gain(r *bits.Reader, want uint32) *float64 {
 	kind := r.Read(3)
-	r.Read(3) // origin
+	r.Read(3) // origin bits
 	negative := r.Read(1) == 1
 	value := float64(r.Read(9)) / 10
 	if kind != want {
@@ -377,10 +376,9 @@ func gain(r *bits.Reader, want uint32) *float64 {
 	return &value
 }
 
-// Settings guesses the LAME command line that produced the stream, such as
-// "-V 2" or "--preset standard". The guess is only reliable for files encoded
-// with the common presets and rate options, and is empty when the header holds
-// nothing to go on.
+// Settings returns the estimated LAME command line for the stream, such as
+// "-V 2" or "--preset standard". The result is valid for common presets and
+// rate options. It is empty when the header lacks data.
 func (l *LAMEHeader) Settings() string {
 	version := l.majorMinor()
 
@@ -405,25 +403,24 @@ func (l *LAMEHeader) Settings() string {
 			return fmt.Sprintf("-b %d", l.Preset)
 		}
 
-	case 3: // variable bitrate, the old code path
-		// LAME replaced its VBR implementation in 3.98 and kept the old one
-		// reachable behind a flag, so the flag is only worth passing from then
-		// on.
+	case 3: // variable bitrate, old code path
+		// LAME replaced its VBR implementation in 3.98. The old implementation
+		// stayed available with a flag. The flag is used only from 3.98 on.
 		if version.atLeast(3, 98) {
 			return fmt.Sprintf("-V %d --vbr-old", l.Quality)
 		}
 		return fmt.Sprintf("-V %d", l.Quality)
 
-	case 4, 5: // variable bitrate, the new code path
-		// From 3.98 on this is the default, so LAME only writes it when asked.
+	case 4, 5: // variable bitrate, new code path
+		// From 3.98 on the new path is the default. No flag is needed.
 		if version.atLeast(3, 98) {
 			return fmt.Sprintf("-V %d", l.vbrQuality())
 		}
 		return fmt.Sprintf("-V %d --vbr-new", l.Quality)
 
 	default:
-		// LAME 3.93 to 3.97 encoded named presets as a fixed VBR method, so the
-		// preset number is the only thing that says how it was encoded.
+		// LAME 3.93 to 3.97 used a fixed VBR method for named presets. The
+		// preset number identifies the encoding.
 		if version.atLeast(3, 93) && version.below(3, 98) {
 			return namedPreset(l.Preset)
 		}
@@ -431,8 +428,8 @@ func (l *LAMEHeader) Settings() string {
 	}
 }
 
-// namedPreset maps the LAME 3.93 to 3.97 preset numbers onto the option that
-// chose them.
+// namedPreset maps LAME 3.93 to 3.97 preset numbers to the option that chose
+// them.
 func namedPreset(preset int) string {
 	switch preset {
 	case 1001:
@@ -452,7 +449,7 @@ func namedPreset(preset int) string {
 	}
 }
 
-// lameVersion is a LAME major and minor version number.
+// lameVersion is a LAME major and minor version.
 type lameVersion struct {
 	major, minor int
 }
@@ -468,16 +465,15 @@ func (v lameVersion) atLeast(major, minor int) bool {
 // below reports whether the version is older than major.minor.
 func (v lameVersion) below(major, minor int) bool { return !v.atLeast(major, minor) }
 
-// majorMinor parses the version out of the [LAMEHeader.Version] string, which
-// looks like "3.99.1+" and may carry a suffix such as " (beta)".
+// majorMinor parses the version from the [LAMEHeader.Version] string. The
+// string has form "3.99.1+" and may include a suffix such as " (beta)".
 func (l *LAMEHeader) majorMinor() lameVersion {
 	major, rest, _ := strings.Cut(l.Version, ".")
 	minor, _, _ := strings.Cut(rest, ".")
 	return lameVersion{major: atoi(major), minor: leadingInt(minor)}
 }
 
-// leadingInt parses the digits at the start of s, stopping at the first
-// character that is not one.
+// leadingInt parses leading digits of s. It stops at the first non-digit.
 func leadingInt(s string) int {
 	n := 0
 	for i := 0; i < len(s) && s[i] >= '0' && s[i] <= '9'; i++ {
@@ -486,7 +482,7 @@ func leadingInt(s string) int {
 	return n
 }
 
-// vbrQuality applies the corrections LAME's own encoder needed after the fact.
+// vbrQuality corrects quality values for known LAME encoding errors.
 // See https://sourceforge.net/p/lame/bugs/455/.
 func (l *LAMEHeader) vbrQuality() int {
 	switch [3]int{l.Quality, l.Bitrate, l.LowPass} {
@@ -501,7 +497,7 @@ func (l *LAMEHeader) vbrQuality() int {
 	}
 }
 
-// atLeast renders a bitrate, where 255 stands for the highest rate available.
+// atLeast formats a bitrate. 255 means 255 or more.
 func atLeast(bitrate int) string {
 	if bitrate >= 255 {
 		return "255+"
@@ -509,8 +505,8 @@ func atLeast(bitrate int) string {
 	return strconv.Itoa(bitrate)
 }
 
-// readAt reads up to n bytes at offset without disturbing the reader's
-// position beyond leaving it somewhere usable.
+// readAt reads up to n bytes at offset. It does not restore the reader
+// position.
 func readAt(r io.ReadSeeker, offset int64, n int) ([]byte, error) {
 	if _, err := r.Seek(offset, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("mp3: seeking: %w", err)

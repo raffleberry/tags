@@ -11,38 +11,34 @@ import (
 	"github.com/raffleberry/tags/tag"
 )
 
-// DataType is the type of a value stored in a "data" atom, which says how to
-// read it.
+// DataType is the type of a value in a "data" atom.
 type DataType uint32
 
-// The data types iTunes actually writes.
+// Data types written by iTunes.
 const (
-	DataImplicit  DataType = 0  // no declared type, the meaning comes from the atom
-	DataUTF8      DataType = 1  // text, no terminator
+	DataImplicit  DataType = 0  // type from atom meaning
+	DataUTF8      DataType = 1  // text without terminator
 	DataUTF16     DataType = 2  // UTF-16BE text
 	DataSJIS      DataType = 3  // Shift-JIS text
-	DataJPEG      DataType = 13 // a JPEG image
-	DataPNG       DataType = 14 // a PNG image
-	DataSignedInt DataType = 21 // a signed big endian integer
-	DataBool      DataType = 21 // a boolean, which is a one byte signed int
+	DataJPEG      DataType = 13 // JPEG image
+	DataPNG       DataType = 14 // PNG image
+	DataSignedInt DataType = 21 // signed big endian integer
+	DataBool      DataType = 21 // boolean as 1 byte signed integer
 )
 
-// ILST is a parsed iTunes metadata list: the atoms under
-// "moov.udta.meta.ilst", each holding one or more values.
+// ILST is a parsed iTunes metadata list at "moov.udta.meta.ilst".
 type ILST struct {
-	// Fields maps an atom name onto its values, in file order. Names are as
-	// iTunes writes them, such as "©nam" and "trkn".
+	// Fields maps atom name to values in file order.
 	Fields map[string][]Value
-	// Order is the atom names in the order they appeared in the file.
+	// Order holds atom names in file order.
 	Order []string
 }
 
-// Value is one value of an atom, kept together with its declared type so that
-// a caller who cares about the distinction can act on it.
+// Value is one atom value with its declared type.
 type Value struct {
 	Type DataType
-	// Data is the raw bytes. Text values are UTF-8 unless the type says
-	// otherwise, and image values are the encoded image.
+	// Data holds raw bytes. Text is UTF-8 unless Type states otherwise. Images
+	// hold encoded image bytes.
 	Data []byte
 }
 
@@ -64,23 +60,21 @@ func (v Value) Int() (int, error) {
 	}
 }
 
-// Text returns the value as a string, decoding it according to its type.
+// Text returns the value as a string. It decodes text by Type.
 func (v Value) Text() string {
 	switch v.Type {
 	case DataUTF16:
 		return decodeUTF16BE(v.Data)
 	case DataSJIS:
-		// Shift-JIS is not decodable without a table, and the values that use
-		// it are rare enough that the bytes are more useful than a guess.
+		// Shift-JIS values are returned as raw bytes.
 		return string(v.Data)
 	default:
 		return string(v.Data)
 	}
 }
 
-// ParseILST reads the iTunes metadata list held in the payload of an "ilst"
-// atom. A field whose payload does not follow the expected shape is skipped,
-// since the rest of the file is still worth reading.
+// ParseILST reads the iTunes metadata list in the payload of an "ilst" atom.
+// Malformed fields are skipped.
 func ParseILST(data []byte) *ILST {
 	ilst := &ILST{Fields: map[string][]Value{}}
 
@@ -92,8 +86,8 @@ func ParseILST(data []byte) *ILST {
 		}
 		body := data[pos+headerLen : pos+length]
 
-		// A freeform atom is named by the application and field names inside
-		// it, and several of them can share the "----" name.
+		// A freeform atom holds application and field names inside. Multiple
+		// freeform atoms share the "----" name.
 		key, values := name, parseDataAtoms(body)
 		if name == freeformAtom {
 			if freeform, field := parseFreeform(body); len(freeform) > 0 {
@@ -111,30 +105,27 @@ func ParseILST(data []byte) *ILST {
 	return ilst
 }
 
-// The atom names that carry a fixed meaning in a metadata list.
+// Atom names with fixed meaning in a metadata list.
 const (
-	// freeformAtom is the name iTunes gives the atoms it has no name for, where
-	// the real name is inside the atom.
+	// freeformAtom marks atoms named inside the atom.
 	freeformAtom = "----"
 	// dataAtom holds one typed value.
 	dataAtom = "data"
 )
 
-// freeformKey renders the "mean:name" pair of a freeform atom as the key it is
-// stored under.
+// freeformKey returns the storage key for a freeform "mean:name" pair.
 func freeformKey(field string) string {
 	return freeformAtom + ":" + field
 }
 
-// parseDataAtoms reads a run of "data" atoms, each a four byte type and flag
-// field followed by the value.
+// parseDataAtoms reads a run of "data" atoms. Each atom holds a 4 byte type
+// and flags field followed by the value.
 func parseDataAtoms(body []byte) []Value {
 	var values []Value
 	for pos := 0; pos+16 <= len(body); {
 		length := int(binary.BigEndian.Uint32(body[pos : pos+4]))
 		if string(body[pos+4:pos+8]) != dataAtom {
-			// A "name" atom may appear here, as iTunes writes one inside a
-			// cover atom; skip whatever this is rather than giving up.
+			// A "name" atom can occur here. Skip unknown atoms.
 			if length < headerLen {
 				break
 			}
@@ -152,9 +143,8 @@ func parseDataAtoms(body []byte) []Value {
 	return values
 }
 
-// parseFreeform reads a "----" atom, which holds a "mean" atom naming the
-// application and a "name" atom naming the field, then the values. The names are
-// kept as the key so that fields from different applications do not collide.
+// parseFreeform reads a "----" atom. It holds a "mean" atom, a "name" atom,
+// then the values. Names form the key to separate applications.
 func parseFreeform(body []byte) ([]Value, string) {
 	mean, pos, ok := readNamed(body, 0, "mean")
 	if !ok {
@@ -167,9 +157,9 @@ func parseFreeform(body []byte) ([]Value, string) {
 	return parseDataAtoms(body[pos:]), string(mean) + ":" + string(name)
 }
 
-// readNamed returns the payload of the atom of the given name at pos, and the
-// offset just past it. The payload of a "mean" or "name" atom starts after a
-// four byte version and flags field.
+// readNamed returns the payload of the atom with the given name at pos, and
+// the offset after it. "mean" and "name" payloads start after 4 bytes of
+// version and flags.
 func readNamed(body []byte, pos int, want string) ([]byte, int, bool) {
 	if pos+headerLen > len(body) {
 		return nil, pos, false
@@ -184,13 +174,11 @@ func readNamed(body []byte, pos int, want string) ([]byte, int, bool) {
 	return body[pos+headerLen+freeLen : pos+length], pos + length, true
 }
 
-// Common renders the metadata list as normalized [tag.Tag] fields.
+// Common returns the metadata list as normalized [tag.Tag] fields.
 //
-// The values of an atom that has a known common meaning are folded onto that
-// key, and everything else keeps its own name, lowercased. Freeform fields are
-// keyed by "mean:name" as well as their own name, so that a field such as
-// "com.apple.iTunes:iTunNORM" is reachable under both. Artwork is not text and
-// is left out; see [ILST.Covers].
+// Atoms with known meaning map to common keys. Other atoms keep their own
+// lowercased names. Freeform fields are keyed by "mean:name". Artwork is
+// excluded. See [ILST.Covers].
 func (i *ILST) Common() tag.Tag {
 	out := tag.Tag{}
 	if i == nil {
@@ -199,8 +187,7 @@ func (i *ILST) Common() tag.Tag {
 	for _, name := range i.Order {
 		values := i.Fields[name]
 
-		// A flag or a number is rendered as text, since that is what a
-		// [tag.Tag] holds.
+		// Flags and numbers are stored as text in [tag.Tag].
 		if key, ok := flagKeys[name]; ok {
 			for _, v := range values {
 				if n, err := v.Int(); err == nil {
@@ -223,7 +210,7 @@ func (i *ILST) Common() tag.Tag {
 		}
 		switch name {
 		case "trkn", "disk":
-			// A pair of numbers: the position and the total.
+			// Two numbers: position and total.
 			position, total, ok := parsePair(values)
 			if !ok {
 				continue
@@ -241,14 +228,13 @@ func (i *ILST) Common() tag.Tag {
 			continue
 
 		case "gnre":
-			// A one based index into the ID3v1 genre list.
+			// One based index into the ID3v1 genre list.
 			for _, v := range values {
 				n, err := v.Int()
 				if err != nil {
 					continue
 				}
-				// The atom counts from 1 where the genre list does too, but
-				// offsets by one, so subtract to get the list index.
+				// The atom counts from 1. Subtract 1 for the list index.
 				if n > 0 && n <= len(tag.Genres) {
 					out.Add(tag.Genre, tag.Genres[n-1])
 				}
@@ -266,8 +252,7 @@ func (i *ILST) Common() tag.Tag {
 	return out
 }
 
-// textValues renders the text of every value, dropping the ones that are not
-// text at all.
+// textValues returns the text of each value. It skips non-text values.
 func textValues(values []Value) []string {
 	var out []string
 	for _, v := range values {
@@ -281,8 +266,7 @@ func textValues(values []Value) []string {
 	return out
 }
 
-// parsePair reads a "trkn" or "disk" atom, which packs two unsigned shorts and
-// a trailing zero into one value.
+// parsePair reads a "trkn" or "disk" value. It holds 2 unsigned shorts.
 func parsePair(values []Value) (position, total int, ok bool) {
 	if len(values) == 0 {
 		return 0, 0, false
@@ -296,8 +280,8 @@ func parsePair(values []Value) (position, total int, ok bool) {
 	return position, total, true
 }
 
-// Covers returns the artwork of a "covr" atom. Each value is an encoded image;
-// the declared type says which of the two formats it is.
+// Covers returns artwork from the "covr" atom. Each value is one encoded image.
+// Type states the format.
 func (i *ILST) Covers() []tag.Picture {
 	if i == nil {
 		return nil
@@ -312,8 +296,7 @@ func (i *ILST) Covers() []tag.Picture {
 		case DataPNG:
 			p.MIME = "image/png"
 		default:
-			// iTunes sometimes writes no type at all for a JPEG, so the magic
-			// bytes are the more reliable source.
+			// Type is sometimes missing for JPEG. Magic bytes apply then.
 			p.MIME = mimeFromImage(v.Data)
 		}
 		if p.MIME != "" {
@@ -323,8 +306,8 @@ func (i *ILST) Covers() []tag.Picture {
 	return pictures
 }
 
-// atomKeys maps the iTunes atoms that name a field with a common meaning onto
-// the normalized key. Atoms not listed here keep their own lowercased name.
+// atomKeys maps iTunes atom names to normalized keys. Unlisted atoms keep
+// their lowercased names.
 var atomKeys = map[string]string{
 	"©nam": tag.Title,
 	"©ART": tag.Artist,
@@ -356,8 +339,7 @@ var atomKeys = map[string]string{
 	"purl": "podcasturl",
 }
 
-// flagKeys maps the atoms that hold a yes or no flag onto the normalized key.
-// The value is rendered as "1" or "0", the way the ID3v2.3 specification has it.
+// flagKeys maps flag atoms to normalized keys. Values are "1" or "0".
 var flagKeys = map[string]string{
 	"cpil": tag.Compilation,
 	"pgap": "partofset",
@@ -365,7 +347,7 @@ var flagKeys = map[string]string{
 	"hdvd": "itunes_hd_video",
 }
 
-// numberKeys maps the atoms that hold a plain integer onto the normalized key.
+// numberKeys maps integer atoms to normalized keys.
 var numberKeys = map[string]string{
 	"tmpo": tag.BPM,
 	"tvsn": "tvseason",
@@ -382,8 +364,7 @@ var numberKeys = map[string]string{
 	"egid": "podcastepisodeguid",
 }
 
-// finishPositions splits the "3/11" values of track and disc, for the files that
-// store a position as a single string rather than as a pair.
+// finishPositions splits "3/11" track and disc values into position and total.
 func finishPositions(out tag.Tag) {
 	for _, key := range []struct{ position, total string }{
 		{tag.Track, tag.TrackTotal},
@@ -405,8 +386,8 @@ func finishPositions(out tag.Tag) {
 	}
 }
 
-// decodeUTF16BE decodes UTF-16 big endian, dropping a trailing odd byte and any
-// unpaired surrogate.
+// decodeUTF16BE decodes UTF-16 big endian. It drops a trailing odd byte and
+// unpaired surrogates.
 func decodeUTF16BE(data []byte) string {
 	n := len(data) / 2
 	if n == 0 {
@@ -419,8 +400,7 @@ func decodeUTF16BE(data []byte) string {
 	return string(utf16.Decode(units))
 }
 
-// mimeFromImage guesses a MIME type from the magic bytes of an image, for
-// taggers that left the type out.
+// mimeFromImage returns a MIME type from image magic bytes.
 func mimeFromImage(data []byte) string {
 	switch {
 	case len(data) > 2 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
@@ -436,7 +416,7 @@ func mimeFromImage(data []byte) string {
 	}
 }
 
-// sizeOf returns the number of bytes left in r.
+// sizeOf returns the bytes left in r.
 func sizeOf(r io.ReadSeeker) (int64, error) {
 	cur, err := r.Seek(0, io.SeekCurrent)
 	if err != nil {

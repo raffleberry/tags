@@ -15,11 +15,11 @@ func TestOpen(t *testing.T) {
 		codec   string
 		duraton float64
 	}{
-		// An AAC stream in an MP4 container, which is what an .m4a file is.
+		// AAC in an MP4 container.
 		{"has-tags.m4a", "mp4a.40.2", 3.70794},
-		// Apple Lossless, whose properties live in a magic cookie.
+		// Apple Lossless with properties in a magic cookie.
 		{"alac.m4a", "alac", 3.68472},
-		// An audiobook.
+		// Audiobook file.
 		{"ep7.m4b", "mp4a.40.2", 2.02014},
 	}
 
@@ -65,13 +65,13 @@ func TestNoTags(t *testing.T) {
 	if got := len(f.Tags()); got != 0 {
 		t.Errorf("len(Tags()) = %d, want 0", got)
 	}
-	// The stream is still readable without tags.
+	// Stream data remains readable without tags.
 	if f.Audio().SampleRate != 44100 {
 		t.Errorf("SampleRate = %d, want 44100", f.Audio().SampleRate)
 	}
 }
 
-// TestNotMP4 covers files that are not MPEG-4 containers at all.
+// TestNotMP4 covers non MPEG-4 files.
 func TestNotMP4(t *testing.T) {
 	for _, name := range []string{"silence-44-s.flac", "silence-44-s.mp3", "emptyfile.mp3"} {
 		if _, err := Open(dataDir + name); err == nil {
@@ -111,8 +111,7 @@ func TestMatches(t *testing.T) {
 	}
 }
 
-// TestAtoms covers reaching the atom tree, which is how a caller gets at the
-// parts of the container the tags do not cover.
+// TestAtoms covers access to the atom tree.
 func TestAtoms(t *testing.T) {
 	f, err := os.Open(dataDir + "has-tags.m4a")
 	if err != nil {
@@ -127,14 +126,13 @@ func TestAtoms(t *testing.T) {
 	if len(atoms) == 0 {
 		t.Fatal("Atoms() is empty, want the top level atoms")
 	}
-	// The file type atom comes first in essentially every MPEG-4 file.
+	// The file type atom is first in most MPEG-4 files.
 	if got, want := atoms[0].Name, "ftyp"; got != want {
 		t.Errorf("Atoms()[0].Name = %q, want %q", got, want)
 	}
 }
 
-// TestParseILST covers reading the metadata list on its own, from a payload
-// rather than from a file.
+// TestParseILST covers metadata list parsing from a payload.
 func TestParseILST(t *testing.T) {
 	f, err := os.Open(dataDir + "has-tags.m4a")
 	if err != nil {
@@ -171,8 +169,7 @@ func TestParseILST(t *testing.T) {
 	}
 }
 
-// TestFormatConstant checks the alias the package offers for the format name, so
-// that a caller need not import package tag for it.
+// TestFormatConstant checks the format alias in this package.
 func TestFormatConstant(t *testing.T) {
 	if Format != tag.M4A {
 		t.Errorf("Format = %q, want %q", Format, tag.M4A)

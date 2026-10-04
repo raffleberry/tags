@@ -5,21 +5,20 @@ import (
 	"time"
 )
 
-// Audio describes the audio stream of a file, independently of the metadata
-// stored alongside it.
+// Audio describes the audio stream of a file. It excludes associated metadata.
 type Audio struct {
 	// Codec names the encoding, such as "MPEG-1 Layer 3", "mp4a.40.2" or
-	// "ALAC". It is empty when the container does not say.
+	// "ALAC". It is empty when the container omits it.
 	Codec string
 	// Encoder names the tool that produced the stream, such as "LAME 3.99.1".
-	// It is empty when unknown, which is common for constant bitrate streams.
+	// It is empty when unknown. Constant bitrate streams often omit it.
 	Encoder string
-	// Duration of the stream. Zero when the container does not record it.
+	// Duration of the stream. Zero when the container omits it.
 	Duration time.Duration
 	// Bitrate in bits per second, averaged over the whole stream. Zero when
 	// unknown.
 	Bitrate int
-	// BitrateMode says whether the stream is constant or variable bitrate.
+	// BitrateMode indicates constant or variable bitrate.
 	BitrateMode BitrateMode
 	// SampleRate in Hz.
 	SampleRate int
@@ -29,7 +28,7 @@ type Audio struct {
 	BitsPerSample int
 }
 
-// String describes the stream on a single line, for logs and errors.
+// String describes the stream on a single line. Use it for logs and errors.
 func (a Audio) String() string {
 	return fmt.Sprintf("%s, %s, %d Hz, %d ch, %.2f s",
 		orDash(a.Codec), bitrateString(a), a.SampleRate, a.Channels,
@@ -40,8 +39,8 @@ func bitrateString(a Audio) string {
 	if a.Bitrate == 0 {
 		return "bitrate unknown"
 	}
-	// A bitrate below ten kbit/s is better shown with a decimal, since rounding
-	// to whole kilobits would lose most of the value.
+	// Bitrates below ten kbit/s use one decimal place. Rounding to whole
+	// kilobits reduces precision at low values.
 	var s string
 	if a.Bitrate < 10000 {
 		s = fmt.Sprintf("%.1f kbps", float64(a.Bitrate)/1000)
@@ -66,23 +65,23 @@ func orDash(s string) string {
 	return s
 }
 
-// BitrateMode describes how a stream's bitrate varies over time.
+// BitrateMode describes bitrate variation over time.
 type BitrateMode int
 
-// The bitrate modes a stream can be encoded with.
+// The bitrate modes for an encoded stream.
 const (
-	// BitrateUnknown means the stream carries no header saying either way.
-	// Constant bitrate files usually fall here.
+	// BitrateUnknown means no header states the mode. Constant bitrate streams
+	// often report this value.
 	BitrateUnknown BitrateMode = iota
-	// BitrateCBR is a constant bitrate.
+	// BitrateCBR is constant bitrate.
 	BitrateCBR
-	// BitrateVBR is a variable bitrate.
+	// BitrateVBR is variable bitrate.
 	BitrateVBR
-	// BitrateABR is an average bitrate, a constrained form of VBR.
+	// BitrateABR is average bitrate. It is a constrained form of VBR.
 	BitrateABR
 )
 
-// String returns the name of the mode, or "CBR?" when it is unknown.
+// String returns the mode name. Unknown modes return "CBR?".
 func (m BitrateMode) String() string {
 	switch m {
 	case BitrateCBR:
@@ -96,8 +95,8 @@ func (m BitrateMode) String() string {
 	}
 }
 
-// PictureType describes what a [Picture] shows, following the ID3v2 APIC
-// picture types that the other containers copied.
+// PictureType describes the content of a [Picture]. Values follow the ID3v2
+// APIC picture types. Other containers use the same values.
 type PictureType int
 
 // The picture types in common use.
@@ -176,30 +175,30 @@ func (t PictureType) String() string {
 
 // Picture is one piece of embedded artwork.
 //
-// FLAC reports every field; ID3v2 and iTunes only record a MIME type and the
-// bytes, leaving the rest zero.
+// FLAC reports every field. ID3v2 and iTunes record only MIME type and bytes.
+// Other fields are zero for those formats.
 type Picture struct {
-	// Type says what the picture shows.
+	// Type describes picture content.
 	Type PictureType
 	// MIME type of Data, such as "image/jpeg". It may be empty when the
-	// container only implied the type.
+	// container omits the type.
 	MIME string
-	// Desc is the human readable caption.
+	// Desc is the caption.
 	Desc string
 	// Width is in pixels.
 	Width int
 	// Height is in pixels.
 	Height int
-	// Depth is the colour depth in bits per pixel.
+	// Depth is color depth in bits per pixel.
 	Depth int
-	// Colors is the size of the palette for indexed images such as GIF, and
-	// zero for direct colour images.
+	// Colors is the palette size for indexed images such as GIF. It is zero
+	// for direct color images.
 	Colors int
 	// Data is the encoded image.
 	Data []byte
 }
 
-// String describes the picture on a single line, for logs and errors.
+// String describes the picture on a single line. Use it for logs and errors.
 func (p Picture) String() string {
 	return fmt.Sprintf("%s %s, %dx%d, %d bytes",
 		p.Type, p.MIME, p.Width, p.Height, len(p.Data))
