@@ -153,5 +153,5 @@ go test ./...
 MIT. See [LICENSE](LICENSE).
 
 The files under `testdata/` come from mutagen. They use GPL-2.0-or-later. See
-[testdata/mutagen/README.md](testdata/mutagen/README.md). No mutagen code is
-compiled into this module.
+[testdata/mutagen/README.md](testdata/mutagen/README.md). **No mutagen code is
+compiled into this module.**
